@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Intel — {{ station.name }}</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 16px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 { font-size: 1.3rem; margin-bottom: 4px; }
+        h2 { font-size: 1.1rem; margin: 20px 0 10px; color: #a0a0a0; text-transform: uppercase; letter-spacing: 1px; font-size: 0.75rem; }
+        .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
+
+        select {
+            background: #16213e;
+            color: #e0e0e0;
+            border: 1px solid #333;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 1rem;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid #2a2a4a;
+        }
+
+        .score-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        .score-green { background: #064e3b; color: #6ee7b7; }
+        .score-yellow { background: #713f12; color: #fde047; }
+        .score-red { background: #7f1d1d; color: #fca5a5; }
+
+        .factor-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .factor-row:last-child { border-bottom: none; }
+        .factor-label { color: #aaa; font-size: 0.85rem; }
+        .factor-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .dot-green { background: #6ee7b7; }
+        .dot-yellow { background: #fde047; }
+        .dot-red { background: #fca5a5; }
+
+        .detail-text { color: #aaa; font-size: 0.8rem; margin-top: 8px; line-height: 1.5; }
+
+        .day-card {
+            background: #1e2a4a;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .day-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .day-date { font-weight: 600; }
+        .day-temps { color: #aaa; font-size: 0.85rem; }
+        .day-window { color: #6ee7b7; font-size: 0.8rem; margin-top: 4px; }
+
+        .hourly-grid {
+            display: none;
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 4px;
+            margin-top: 10px;
+        }
+        .hourly-grid.open { display: grid; }
+        .hour-cell {
+            text-align: center;
+            padding: 6px 4px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+        }
+        .hour-cell.green { background: #064e3b44; }
+        .hour-cell.yellow { background: #713f1244; }
+        .hour-cell.red { background: #7f1d1d44; }
+        .hour-time { color: #888; }
+        .hour-temp { font-weight: 600; font-size: 0.85rem; }
+
+        .toggle-btn {
+            background: none;
+            border: 1px solid #444;
+            color: #aaa;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .toggle-btn:hover { border-color: #6ee7b7; color: #6ee7b7; }
+    </style>
+</head>
+<body>
+    <h1>Weather Intel</h1>
+    <p class="subtitle">{{ station.name }} — {{ station.covers }}</p>
+
+    <select onchange="window.location.href='/?town=' + this.value">
+        {% for slug, s in stations.items() %}
+        <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
+        {% endfor %}
+    </select>
+
+    <!-- SEALER CHECK -->
+    <h2>Sealer Check (Last 24h)</h2>
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span class="score-badge score-{{ sealer_score or 'yellow' }}">
+                {% if sealer_score == 'green' %}SAFE TO SEAL
+                {% elif sealer_score == 'yellow' %}USE CAUTION
+                {% else %}DO NOT SEAL{% endif %}
+            </span>
+        </div>
+
+        {% for factor, value in sealer_factors.items() %}
+        <div class="factor-row">
+            <span class="factor-label">{{ factor.replace('_', ' ').title() }}</span>
+            <span class="factor-dot dot-{{ value }}"></span>
+        </div>
+        {% endfor %}
+
+        <div class="detail-text">
+            {% if sealer_details.total_precip_24h == 0 %}Rain last 24h: None
+            {% else %}Rain last 24h: {{ sealer_details.total_precip_24h }}"{% endif %}<br>
+            {% if sealer_details.current_temp %}Temp: {{ sealer_details.current_temp|round(0)|int }}°F{% endif %}
+            {% if sealer_details.current_humidity %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}<br>
+            {% if sealer_details.max_precip_prob is not none %}Rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int }}%{% endif %}
+            {% if sealer_details.dewpoint_spread %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}
+        </div>
+    </div>
+
+    <!-- 48-HOUR FORECAST -->
+    <h2>48-Hour Pour Forecast</h2>
+    {% for day in days %}
+    <div class="day-card">
+        <div class="day-header">
+            <span class="day-date">{{ day.date }}</span>
+            <span class="score-badge score-{{ day.score }}">{{ day.score|upper }}</span>
+        </div>
+        <div class="day-temps">
+            {% if day.temp_low is not none %}{{ day.temp_low|round(0)|int }}°{% endif %} — {% if day.temp_high is not none %}{{ day.temp_high|round(0)|int }}°F{% endif %}
+        </div>
+        {% if day.best_window %}
+        <div class="day-window">Best pour window: {{ day.best_window }}</div>
+        {% endif %}
+        <button class="toggle-btn" onclick="this.nextElementSibling.classList.toggle('open')">Hourly ▼</button>
+        <div class="hourly-grid">
+            {% for h in day.hours %}
+            {% if h.hour >= 5 and h.hour <= 21 %}
+            <div class="hour-cell {{ h.pour_score or 'yellow' }}">
+                <div class="hour-time">{{ "%02d"|format(h.hour) }}:00</div>
+                <div class="hour-temp">{{ h.temp_f|round(0)|int if h.temp_f else '—' }}°</div>
+                <div>{{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="detail-text" style="margin-top:20px; text-align:center;">
+        Data: Open-Meteo (forecast) · NOAA GHCN (historical)<br>
+        Updated: {{ now().strftime('%Y-%m-%d %H:%M') if now is defined else '' }}
+    </div>
+</body>
+</html>
