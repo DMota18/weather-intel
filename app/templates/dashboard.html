@@ -7,187 +7,469 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            padding: 16px;
-            max-width: 600px;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            background: #000000;
+            color: #ffffff;
+            max-width: 500px;
             margin: 0 auto;
-        }
-        h1 { font-size: 1.3rem; margin-bottom: 4px; }
-        h2 { font-size: 1.1rem; margin: 20px 0 10px; color: #a0a0a0; text-transform: uppercase; letter-spacing: 1px; font-size: 0.75rem; }
-        .subtitle { color: #888; font-size: 0.85rem; margin-bottom: 16px; }
-
-        select {
-            background: #16213e;
-            color: #e0e0e0;
-            border: 1px solid #333;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 1rem;
-            width: 100%;
-            margin-bottom: 20px;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .card {
-            background: #16213e;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            border: 1px solid #2a2a4a;
-        }
-
-        .score-badge {
-            display: inline-block;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-weight: 700;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-        }
-        .score-green { background: #064e3b; color: #6ee7b7; }
-        .score-yellow { background: #713f12; color: #fde047; }
-        .score-red { background: #7f1d1d; color: #fca5a5; }
-
-        .factor-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px 0;
-            border-bottom: 1px solid #2a2a4a;
-        }
-        .factor-row:last-child { border-bottom: none; }
-        .factor-label { color: #aaa; font-size: 0.85rem; }
-        .factor-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-        .dot-green { background: #6ee7b7; }
-        .dot-yellow { background: #fde047; }
-        .dot-red { background: #fca5a5; }
-
-        .detail-text { color: #aaa; font-size: 0.8rem; margin-top: 8px; line-height: 1.5; }
-
-        .day-card {
-            background: #1e2a4a;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 10px;
-        }
-        .day-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .day-date { font-weight: 600; }
-        .day-temps { color: #aaa; font-size: 0.85rem; }
-        .day-window { color: #6ee7b7; font-size: 0.8rem; margin-top: 4px; }
-
-        .hourly-grid {
-            display: none;
-            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-            gap: 4px;
-            margin-top: 10px;
-        }
-        .hourly-grid.open { display: grid; }
-        .hour-cell {
+        /* ---- Header ---- */
+        .header {
             text-align: center;
-            padding: 6px 4px;
-            border-radius: 6px;
-            font-size: 0.7rem;
+            padding: 40px 20px 12px;
         }
-        .hour-cell.green { background: #064e3b44; }
-        .hour-cell.yellow { background: #713f1244; }
-        .hour-cell.red { background: #7f1d1d44; }
-        .hour-time { color: #888; }
-        .hour-temp { font-weight: 600; font-size: 0.85rem; }
+        .header select {
+            background: transparent;
+            color: rgba(255,255,255,0.6);
+            border: none;
+            font-size: 0.85rem;
+            text-align: center;
+            letter-spacing: 0.5px;
+        }
+        .current-temp {
+            font-size: 5.5rem;
+            font-weight: 200;
+            line-height: 1;
+            letter-spacing: -4px;
+            margin: 4px 0;
+        }
+        .current-desc {
+            font-size: 0.95rem;
+            color: rgba(255,255,255,0.6);
+        }
+        .current-hilo {
+            font-size: 0.95rem;
+            color: rgba(255,255,255,0.5);
+            margin-top: 2px;
+        }
 
-        .toggle-btn {
-            background: none;
-            border: 1px solid #444;
-            color: #aaa;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            cursor: pointer;
-            margin-top: 8px;
+        /* ---- Verdict bar ---- */
+        .verdict-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 20px 16px;
+            justify-content: center;
         }
-        .toggle-btn:hover { border-color: #6ee7b7; color: #6ee7b7; }
+        .vb {
+            padding: 5px 14px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .vb-green { background: rgba(52,199,89,0.2); color: #34c759; }
+        .vb-yellow { background: rgba(255,204,0,0.2); color: #ffcc00; }
+        .vb-red { background: rgba(255,69,58,0.2); color: #ff453a; }
+        .vb-blue { background: rgba(10,132,255,0.2); color: #0a84ff; }
+        .vb-clickable { cursor: pointer; }
+
+        /* ---- Detail panel (slide-down on click) ---- */
+        .detail-panel {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: rgba(255,255,255,0.03);
+            margin: 0 16px;
+            border-radius: 0 0 14px 14px;
+        }
+        .detail-panel.open { max-height: 500px; }
+        .detail-panel-inner { padding: 14px 16px; }
+        .dp-title {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+            color: rgba(255,255,255,0.5);
+        }
+        .dp-factor {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .dp-factor:last-child { border-bottom: none; }
+        .dp-factor-name { font-size: 0.8rem; color: rgba(255,255,255,0.7); }
+        .dp-factor-val { font-size: 0.8rem; font-weight: 600; }
+        .dp-factor-detail { font-size: 0.65rem; color: rgba(255,255,255,0.35); }
+        .dp-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;
+        }
+        .dp-dot-green { background: #34c759; }
+        .dp-dot-yellow { background: #ffcc00; }
+        .dp-dot-red { background: #ff453a; }
+        .dp-threshold {
+            font-size: 0.6rem;
+            color: rgba(255,255,255,0.25);
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+
+        /* ---- Cards ---- */
+        .card {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            margin: 0 16px 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .card-header {
+            padding: 12px 16px 8px;
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: rgba(255,255,255,0.4);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        /* ---- Hourly scroll (Apple Weather style) ---- */
+        .hourly-scroll {
+            display: flex;
+            overflow-x: auto;
+            padding: 12px 0;
+            scroll-snap-type: x mandatory;
+        }
+        .hourly-scroll::-webkit-scrollbar { display: none; }
+        .h-col {
+            flex: 0 0 60px;
+            text-align: center;
+            padding: 4px 0;
+            scroll-snap-align: start;
+        }
+        .h-col .h-time { font-size: 0.7rem; color: rgba(255,255,255,0.5); font-weight: 500; }
+        .h-col .h-icon { font-size: 1.3rem; margin: 6px 0; line-height: 1; }
+        .h-col .h-temp { font-size: 0.95rem; font-weight: 600; }
+        .h-col .h-rain { font-size: 0.6rem; color: #0a84ff; margin-top: 2px; min-height: 14px; }
+        .h-col.h-now .h-time { color: #ffffff; font-weight: 700; }
+        .h-day-sep {
+            flex: 0 0 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 8px 4px;
+        }
+
+        /* ---- Two-column detail layout ---- */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 0 16px 12px;
+        }
+
+        /* ---- 48h forecast table ---- */
+        .forecast-table { width: 100%; }
+        .ft-row {
+            display: flex;
+            align-items: center;
+            padding: 8px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .ft-row:last-child { border-bottom: none; }
+        .ft-time {
+            width: 50px;
+            font-size: 0.75rem;
+            color: rgba(255,255,255,0.5);
+        }
+        .ft-icon { width: 28px; font-size: 1rem; text-align: center; }
+        .ft-temp {
+            width: 40px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-align: right;
+        }
+        .ft-bar-wrap {
+            flex: 1;
+            padding: 0 10px;
+        }
+        .ft-bar {
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .ft-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+        }
+        .ft-precip {
+            width: 32px;
+            text-align: right;
+            font-size: 0.75rem;
+            color: #0a84ff;
+        }
+        .ft-day-label {
+            padding: 10px 16px 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: rgba(255,255,255,0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ---- Condition rows ---- */
+        .cond-row {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .cond-row:last-child { border-bottom: none; }
+        .cond-time { width: 50px; font-size: 0.75rem; color: rgba(255,255,255,0.5); }
+        .cond-vals { flex: 1; display: flex; justify-content: space-around; }
+        .cond-v { text-align: center; font-size: 0.8rem; }
+        .cond-v-lbl { font-size: 0.55rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* ---- Unified 48h table ---- */
+        .u-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .u-row:last-child { border-bottom: none; }
+        .u-header-row {
+            padding: 8px 14px 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .u-header-row div {
+            font-size: 0.55rem;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: rgba(255,255,255,0.3);
+        }
+        .u-time { width: 28px; font-size: 0.7rem; color: rgba(255,255,255,0.5); flex-shrink: 0; }
+        .u-temp-col { width: 34px; font-size: 0.85rem; font-weight: 600; text-align: right; flex-shrink: 0; }
+        .u-bar-col { flex: 1; padding: 0 8px; min-width: 0; }
+        .u-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+        .u-bar-fill { height: 100%; border-radius: 2px; }
+        .u-rain-col { width: 32px; font-size: 0.7rem; text-align: right; flex-shrink: 0; }
+        .u-sep { width: 1px; height: 18px; background: rgba(255,255,255,0.08); margin: 0 8px; flex-shrink: 0; }
+        .u-cond-col { width: 40px; font-size: 0.75rem; text-align: center; flex-shrink: 0; }
+        .u-day-label {
+            padding: 10px 14px 2px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: rgba(255,255,255,0.35);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 20px 16px 40px; }
     </style>
 </head>
 <body>
-    <h1>Weather Intel</h1>
-    <p class="subtitle">{{ station.name }} — {{ station.covers }}</p>
+    {% if forecast_hours %}
+    {% set now = forecast_hours[0] %}
+    {% set today = days[0] if days else none %}
 
-    <select onchange="window.location.href='/?town=' + this.value">
-        {% for slug, s in stations.items() %}
-        <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
-        {% endfor %}
-    </select>
-
-    <!-- SEALER CHECK -->
-    <h2>Sealer Check (Last 24h)</h2>
-    <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span class="score-badge score-{{ sealer_score or 'yellow' }}">
-                {% if sealer_score == 'green' %}SAFE TO SEAL
-                {% elif sealer_score == 'yellow' %}USE CAUTION
-                {% else %}DO NOT SEAL{% endif %}
-            </span>
+    <!-- HEADER -->
+    <div class="header">
+        <select onchange="window.location.href='/?town=' + this.value">
+            {% for slug, s in stations.items() %}
+            <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
+            {% endfor %}
+        </select>
+        <div class="current-temp">{{ now.temp_f|round(0)|int if now.temp_f else '—' }}°</div>
+        <div class="current-desc">
+            {% if (now.precip_prob_pct or 0) >= 40 %}Rain Likely
+            {% elif (now.precip_prob_pct or 0) >= 15 %}Chance of Rain
+            {% elif (now.cloud_cover_pct or 0) >= 70 %}Overcast
+            {% elif (now.cloud_cover_pct or 0) >= 30 %}Partly Cloudy
+            {% else %}Clear{% endif %}
         </div>
+        {% if today %}
+        <div class="current-hilo">H:{{ today.temp_high|round(0)|int }}°  L:{{ today.temp_low|round(0)|int }}°</div>
+        {% endif %}
+    </div>
 
-        {% for factor, value in sealer_factors.items() %}
-        <div class="factor-row">
-            <span class="factor-label">{{ factor.replace('_', ' ').title() }}</span>
-            <span class="factor-dot dot-{{ value }}"></span>
-        </div>
-        {% endfor %}
+    <!-- VERDICTS (clickable) -->
+    <div class="verdict-bar">
+        <span class="vb vb-{{ sealer_score or 'yellow' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
+        <span class="vb vb-{{ today.score if today else 'yellow' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
+        {% if today and today.best_window %}
+        <span class="vb vb-blue">{{ today.best_window }}</span>
+        {% endif %}
+    </div>
 
-        <div class="detail-text">
-            {% if sealer_details.total_precip_24h == 0 %}Rain last 24h: None
-            {% else %}Rain last 24h: {{ sealer_details.total_precip_24h }}"{% endif %}<br>
-            {% if sealer_details.current_temp %}Temp: {{ sealer_details.current_temp|round(0)|int }}°F{% endif %}
-            {% if sealer_details.current_humidity %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}<br>
-            {% if sealer_details.max_precip_prob is not none %}Rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int }}%{% endif %}
-            {% if sealer_details.dewpoint_spread %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}
+    <!-- SEALER DETAIL PANEL -->
+    <div class="detail-panel" id="sealer-panel">
+        <div class="detail-panel-inner">
+            <div class="dp-title">Sealer Assessment</div>
+            {% for factor, value in sealer_factors.items() %}
+            <div class="dp-factor">
+                <div>
+                    <span class="dp-dot dp-dot-{{ value }}"></span>
+                    <span class="dp-factor-name">{{ factor.replace('_', ' ').title() }}</span>
+                </div>
+                <span class="dp-factor-val" style="color:{% if value == 'green' %}#34c759{% elif value == 'yellow' %}#ffcc00{% else %}#ff453a{% endif %}">{{ value|upper }}</span>
+            </div>
+            {% endfor %}
+            <div class="dp-threshold">
+                <strong>Current readings:</strong><br>
+                {% if sealer_details.current_temp %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
+                {% if sealer_details.current_humidity %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
+                {% if sealer_details.dewpoint_spread %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}<br>
+                Rain last 24h: {% if sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
+                · Max rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int if sealer_details.max_precip_prob is not none else '—' }}%
+            </div>
+            <div class="dp-threshold" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
+                <strong>Thresholds:</strong><br>
+                Temp: 50–90°F green · 40–50°F caution · &lt;40°F no<br>
+                Rain last 24h: None green · &lt;0.1" caution · Any red<br>
+                Rain next 24h: &lt;10% green · 10–40% caution · &gt;40% red<br>
+                Humidity: &lt;70% green · 70–85% caution · &gt;85% red<br>
+                Dewpoint spread: &gt;10°F green · 5–10°F caution · &lt;5°F red
+            </div>
         </div>
     </div>
 
-    <!-- 48-HOUR FORECAST -->
-    <h2>48-Hour Pour Forecast</h2>
-    {% for day in days %}
-    <div class="day-card">
-        <div class="day-header">
-            <span class="day-date">{{ day.date }}</span>
-            <span class="score-badge score-{{ day.score }}">{{ day.score|upper }}</span>
-        </div>
-        <div class="day-temps">
-            {% if day.temp_low is not none %}{{ day.temp_low|round(0)|int }}°{% endif %} — {% if day.temp_high is not none %}{{ day.temp_high|round(0)|int }}°F{% endif %}
-        </div>
-        {% if day.best_window %}
-        <div class="day-window">Best pour window: {{ day.best_window }}</div>
-        {% endif %}
-        <button class="toggle-btn" onclick="this.nextElementSibling.classList.toggle('open')">Hourly ▼</button>
-        <div class="hourly-grid">
-            {% for h in day.hours %}
-            {% if h.hour >= 5 and h.hour <= 21 %}
-            <div class="hour-cell {{ h.pour_score or 'yellow' }}">
-                <div class="hour-time">{{ "%02d"|format(h.hour) }}:00</div>
-                <div class="hour-temp">{{ h.temp_f|round(0)|int if h.temp_f else '—' }}°</div>
-                <div>{{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph</div>
+    <!-- POUR DETAIL PANEL -->
+    <div class="detail-panel" id="pour-panel">
+        <div class="detail-panel-inner">
+            <div class="dp-title">Pour Assessment — Work Hours (7AM–5PM)</div>
+            {% for h in forecast_hours %}
+            {% if h.hour >= 7 and h.hour <= 17 %}
+            {% set pp = h.precip_prob_pct or 0 %}
+            <div class="dp-factor">
+                <div>
+                    <span class="dp-dot dp-dot-{{ h.pour_score or 'yellow' }}"></span>
+                    <span class="dp-factor-name">{{ "%02d"|format(h.hour) }}:00</span>
+                    <span class="dp-factor-detail" style="margin-left:6px;">
+                        {{ h.temp_f|round(0)|int if h.temp_f else '—' }}° · {{ pp|round(0)|int }}% rain · {{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph · {{ h.humidity_pct|round(0)|int if h.humidity_pct else '—' }}% humid
+                    </span>
+                </div>
+                <span class="dp-factor-val" style="color:{% if h.pour_score == 'green' %}#34c759{% elif h.pour_score == 'yellow' %}#ffcc00{% else %}#ff453a{% endif %}">
+                    {% if h.pour_factors %}
+                        {% for f, v in h.pour_factors.items() %}{% if v != 'green' %}{{ f[:4] }}{% if not loop.last %} {% endif %}{% endif %}{% endfor %}
+                        {% set bad = h.pour_factors.values()|select('ne', 'green')|list %}
+                        {% if not bad %}OK{% endif %}
+                    {% endif %}
+                </span>
             </div>
             {% endif %}
             {% endfor %}
+            <div class="dp-threshold" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
+                <strong>Thresholds:</strong><br>
+                Temp: 50–90°F green · 40–50 or 90–95°F caution · &lt;40 or &gt;95°F red<br>
+                Precip: &lt;15% green · 15–40% caution · &gt;40% red<br>
+                Wind: &lt;10mph green · 10–20mph caution · &gt;20mph red<br>
+                Humidity: 25–70% green · 15–25 or 70–85% caution · else red<br>
+                Dewpoint spread: &gt;10°F green · 5–10°F caution · &lt;5°F red
+            </div>
         </div>
     </div>
-    {% endfor %}
 
-    <div class="detail-text" style="margin-top:20px; text-align:center;">
-        Data: Open-Meteo (forecast) · NOAA GHCN (historical)<br>
-        Updated: {{ now().strftime('%Y-%m-%d %H:%M') if now is defined else '' }}
+    <!-- HOURLY SCROLL (next 24h quick glance) -->
+    <div class="card">
+        <div class="card-header">Hourly Forecast</div>
+        <div class="hourly-scroll">
+            {% set prev_d = namespace(val='') %}
+            {% for h in forecast_hours[:24] %}
+            {% set ds = h.time[:10] %}
+            {% if ds != prev_d.val and not loop.first %}
+                <div class="h-day-sep"></div>
+                {% set prev_d.val = ds %}
+            {% endif %}
+            {% if loop.first %}{% set prev_d.val = ds %}{% endif %}
+            <div class="h-col {% if loop.first %}h-now{% endif %}">
+                <div class="h-time">{% if loop.first %}Now{% else %}{{ "%02d"|format(h.hour) }}{% endif %}</div>
+                <div class="h-icon">{% set pp = h.precip_prob_pct or 0 %}{% if pp >= 40 %}🌧{% elif pp >= 15 %}🌦{% elif (h.cloud_cover_pct or 0) >= 70 %}☁️{% elif (h.cloud_cover_pct or 0) >= 30 %}⛅{% else %}☀️{% endif %}</div>
+                <div class="h-temp">{{ h.temp_f|round(0)|int }}°</div>
+                {% if pp >= 10 %}<div class="h-rain">{{ pp|round(0)|int }}%</div>{% else %}<div class="h-rain"></div>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
     </div>
+
+    <!-- 48-HOUR DETAIL: unified table -->
+    <div class="card">
+        <div class="card-header">48-Hour Detail</div>
+        <!-- Column headers -->
+        <div class="u-row u-header-row">
+            <div class="u-time"></div>
+            <div class="u-temp-col">Temp</div>
+            <div class="u-bar-col"></div>
+            <div class="u-rain-col">Rain</div>
+            <div class="u-sep"></div>
+            <div class="u-cond-col">Rain</div>
+            <div class="u-cond-col">Wind</div>
+            <div class="u-cond-col">Humid</div>
+        </div>
+
+        {% set temps = [] %}
+        {% for h in forecast_hours %}{% if h.temp_f is not none %}{% set _ = temps.append(h.temp_f) %}{% endif %}{% endfor %}
+        {% set t_min = temps|min if temps else 30 %}
+        {% set t_max = temps|max if temps else 90 %}
+        {% set t_range = [t_max - t_min, 1]|max %}
+
+        {% set prev_d2 = namespace(val='') %}
+        {% for h in forecast_hours %}
+        {% if h.hour % 3 == 0 %}
+        {% set ds = h.time[:10] %}
+        {% if ds != prev_d2.val %}
+            {% set prev_d2.val = ds %}
+            <div class="u-day-label">{{ ds[5:] }}</div>
+        {% endif %}
+        {% set t = h.temp_f or t_min %}
+        {% set pct = ((t - t_min) / t_range * 70 + 15) %}
+        {% set pp = h.precip_prob_pct or 0 %}
+        <div class="u-row" {% if h.hour < 7 or h.hour > 17 %}style="opacity:0.3"{% endif %}>
+            <div class="u-time">{{ "%02d"|format(h.hour) }}</div>
+            <div class="u-temp-col" style="{% if t < 40 %}color:#64b5f6{% elif t < 50 %}color:#4dd0e1{% elif t <= 90 %}color:#fff{% elif t <= 95 %}color:#ffb74d{% else %}color:#ef5350{% endif %}">{{ t|round(0)|int }}°</div>
+            <div class="u-bar-col">
+                <div class="u-bar">
+                    <div class="u-bar-fill" style="width:{{ pct|round(0)|int }}%; background:{% if t < 40 %}#64b5f6{% elif t < 50 %}#4dd0e1{% elif t <= 90 %}#4caf50{% elif t <= 95 %}#ffb74d{% else %}#ef5350{% endif %};"></div>
+                </div>
+            </div>
+            <div class="u-rain-col" style="{% if pp >= 40 %}color:#0a84ff{% elif pp >= 10 %}color:#0a84ff{% else %}color:rgba(255,255,255,0.15){% endif %}">{% if pp >= 10 %}{{ pp|round(0)|int }}%{% else %}—{% endif %}</div>
+            <div class="u-sep"></div>
+            <div class="u-cond-col" style="{% if pp >= 40 %}color:#ff453a{% elif pp >= 15 %}color:#ffcc00{% else %}color:rgba(255,255,255,0.4){% endif %}">{{ pp|round(0)|int }}%</div>
+            <div class="u-cond-col" style="{% if (h.wind_mph or 0) >= 20 %}color:#ff453a{% elif (h.wind_mph or 0) >= 10 %}color:#ffcc00{% else %}color:rgba(255,255,255,0.7){% endif %}">{{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}</div>
+            <div class="u-cond-col" style="{% if (h.humidity_pct or 0) >= 85 %}color:#ff453a{% elif (h.humidity_pct or 0) >= 70 %}color:#ffcc00{% else %}color:rgba(255,255,255,0.7){% endif %}">{{ h.humidity_pct|round(0)|int if h.humidity_pct else '—' }}%</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    <!-- DAY SUMMARIES -->
+    <div class="card">
+        <div class="card-header">Daily Overview</div>
+        {% for day in days %}
+        <div style="display:flex; align-items:center; padding:10px 16px; {% if not loop.last %}border-bottom:1px solid rgba(255,255,255,0.04);{% endif %}">
+            <div style="flex:1;">
+                <span style="font-weight:600; font-size:0.85rem;">{{ day.date[5:] }}</span>
+                <span style="color:rgba(255,255,255,0.4); font-size:0.8rem; margin-left:8px;">{{ day.temp_low|round(0)|int if day.temp_low is not none else '—' }}°–{{ day.temp_high|round(0)|int if day.temp_high is not none else '—' }}°</span>
+            </div>
+            {% if day.best_window %}
+            <span style="font-size:0.65rem; color:#0a84ff; margin-right:10px;">{{ day.best_window }}</span>
+            {% endif %}
+            <span class="vb vb-{{ day.score }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% else %}
+    <div style="text-align:center; padding:60px 20px; color:rgba(255,255,255,0.3);">
+        Unable to load forecast data. Try refreshing.
+    </div>
+    {% endif %}
+
+    <div class="footer">Open-Meteo (forecast) · NOAA GHCN (historical)</div>
+
+    <script>
+    function togglePanel(id) {
+        var panel = document.getElementById(id);
+        var allPanels = document.querySelectorAll('.detail-panel');
+        allPanels.forEach(function(p) {
+            if (p.id !== id) p.classList.remove('open');
+        });
+        panel.classList.toggle('open');
+    }
+    </script>
 </body>
 </html>

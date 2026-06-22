@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: stg_stations
+    description: "Cleaned weather station reference data"
+    columns:
+      - name: station_id
+        description: "NOAA station identifier (e.g., USW00094746)"
+        tests:
+          - unique
+          - not_null
+      - name: station_name
+        tests:
+          - not_null
+
+  - name: stg_daily_weather
+    description: "Cleaned daily weather observations with completeness flag"
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: station_id
+        tests:
+          - not_null
+      - name: observation_date
+        tests:
+          - not_null
+      - name: pour_score
+        tests:
+          - accepted_values:
+              values: ['green', 'yellow', 'red']
+      - name: sealer_score
+        tests:
+          - accepted_values:
+              values: ['green', 'yellow', 'red']
+
+  - name: stg_jobs
+    description: "Cleaned job data with computed fields"
+    columns:
+      - name: job_id
+        tests:
+          - unique
+          - not_null
+      - name: station_id
+        tests:
+          - relationships:
+              to: ref('stg_stations')
+              field: station_id

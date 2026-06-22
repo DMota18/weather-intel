@@ -198,7 +198,7 @@ def score_cure_window(hourly_forecast: list[dict]) -> tuple:
     return overall, factors, issues
 
 
-def find_best_window(hourly_scores, start_hour=6, end_hour=20):
+def find_best_window(hourly_scores, start_hour=7, end_hour=17):
     """Find longest contiguous green window within working hours."""
     best_start = None
     best_length = 0

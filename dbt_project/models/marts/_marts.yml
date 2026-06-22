@@ -1,0 +1,44 @@
+version: 2
+
+models:
+  - name: mart_data_quality
+    description: "Data completeness audit across all NOAA stations"
+    columns:
+      - name: station_id
+        tests:
+          - unique
+          - not_null
+      - name: coverage_pct
+        tests:
+          - not_null
+
+  - name: mart_season_boundaries
+    description: "Concrete season start/end dates per station per year"
+    columns:
+      - name: station_id
+        tests:
+          - not_null
+      - name: year
+        tests:
+          - not_null
+      - name: season_length_days
+        description: "Should be positive and within reasonable bounds"
+
+  - name: mart_job_weather
+    description: "Job-weather correlation — each job enriched with weather stats"
+    columns:
+      - name: job_id
+        tests:
+          - unique
+          - not_null
+      - name: pour_day_score
+        tests:
+          - accepted_values:
+              values: ['green', 'yellow', 'red']
+
+  - name: mart_year_over_year
+    description: "Year-over-year monthly weather comparisons with LAG"
+    columns:
+      - name: station_id
+        tests:
+          - not_null

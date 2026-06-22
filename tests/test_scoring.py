@@ -130,9 +130,9 @@ class TestBestWindow:
         return [{"hour": h, "score": s} for h, s in scores_by_hour]
 
     def test_full_green_day(self):
-        hours = self._make_hours([(h, "green") for h in range(6, 20)])
+        hours = self._make_hours([(h, "green") for h in range(7, 18)])
         result = find_best_window(hours)
-        assert result == "06:00-20:00"
+        assert result == "07:00-17:00"
 
     def test_green_window_in_middle(self):
         hours = self._make_hours(
@@ -157,8 +157,8 @@ class TestBestWindow:
 
     def test_ignores_hours_outside_work_window(self):
         hours = self._make_hours(
-            [(3, "green"), (4, "green"), (5, "green"),
-             (6, "red"), (7, "red")] + [(h, "red") for h in range(8, 20)]
+            [(3, "green"), (4, "green"), (5, "green"), (6, "green"),
+             (7, "red")] + [(h, "red") for h in range(8, 18)]
         )
         result = find_best_window(hours)
         assert result is None

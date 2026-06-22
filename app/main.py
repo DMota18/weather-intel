@@ -6,7 +6,10 @@ import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
-from fastapi import FastAPI, Request, HTTPException, Query
+import asyncio
+import threading
+import redis
+from fastapi import FastAPI, Request, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import psycopg2
@@ -151,7 +154,7 @@ async def get_forecast(town: str):
 
     day_summaries = []
     for day_key, day_hours in days.items():
-        scores = [h["pour_score"] for h in day_hours if h["pour_score"]]
+        scores = [h["pour_score"] for h in day_hours if h["pour_score"] and 7 <= h["hour"] <= 17]
         if "red" in scores:
             day_score = "red"
         elif "yellow" in scores:
@@ -455,6 +458,28 @@ async def analytics_station_comparison():
 
 
 # ============================================================
+# JOB-WEATHER CORRELATION
+# ============================================================
+
+@app.get("/api/v1/jobs")
+async def list_jobs():
+    """All jobs with weather summary."""
+    return _query_view("SELECT * FROM v_job_weather_summary ORDER BY start_date DESC")
+
+
+@app.get("/api/v1/jobs/{job_id}")
+async def get_job_weather(job_id: int):
+    """Day-by-day weather for a specific job."""
+    rows = _query_view(
+        "SELECT * FROM v_job_weather WHERE job_id = %s ORDER BY observation_date",
+        [job_id]
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No job found with id {job_id}")
+    return rows
+
+
+# ============================================================
 # DASHBOARD
 # ============================================================
 
@@ -522,7 +547,7 @@ async def dashboard(request: Request, town: str = "worcester"):
 
     day_summaries = []
     for day_key, day_hours in days.items():
-        scores = [h["pour_score"] for h in day_hours if h["pour_score"]]
+        scores = [h["pour_score"] for h in day_hours if h["pour_score"] and 7 <= h["hour"] <= 17]
         day_score = "red" if "red" in scores else ("yellow" if "yellow" in scores else "green")
         temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
         day_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours])
@@ -553,6 +578,88 @@ async def dashboard(request: Request, town: str = "worcester"):
         "forecast_hours": scored_forecast,
     }
     return templates.TemplateResponse(request, "dashboard.html", context)
+
+
+# ============================================================
+# WEBSOCKET — Real-time weather updates
+# ============================================================
+
+connected_clients: list[WebSocket] = []
+PUBSUB_CHANNEL = "weather:live"
+
+
+async def redis_listener():
+    """Background task: subscribe to Redis pubsub and broadcast to WebSocket clients."""
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    pubsub = r.pubsub()
+    pubsub.subscribe(PUBSUB_CHANNEL)
+
+    loop = asyncio.get_event_loop()
+
+    def _listen():
+        for message in pubsub.listen():
+            if message["type"] == "message":
+                data = message["data"]
+                asyncio.run_coroutine_threadsafe(_broadcast(data), loop)
+
+    thread = threading.Thread(target=_listen, daemon=True)
+    thread.start()
+
+
+async def _broadcast(data: str):
+    """Send data to all connected WebSocket clients."""
+    disconnected = []
+    for ws in connected_clients:
+        try:
+            await ws.send_text(data)
+        except Exception:
+            disconnected.append(ws)
+    for ws in disconnected:
+        connected_clients.remove(ws)
+
+
+@app.on_event("startup")
+async def start_redis_listener():
+    await redis_listener()
+
+
+@app.websocket("/ws/live")
+async def websocket_live(ws: WebSocket):
+    """Real-time weather updates via WebSocket.
+
+    Clients connect and receive JSON messages whenever:
+    - Weather conditions update (every 15 min)
+    - Pour/sealer scores change
+    - NWS issues a severe weather alert relevant to concrete work
+    """
+    await ws.accept()
+    connected_clients.append(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        connected_clients.remove(ws)
+
+
+@app.get("/api/v1/stream/status")
+async def stream_status():
+    """Check streaming system health."""
+    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+    try:
+        weather_len = r.xlen("weather:updates")
+        alerts_len = r.xlen("weather:alerts")
+        last_entries = r.xrevrange("weather:updates", count=1)
+        last_update = last_entries[0][1] if last_entries else None
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+    return {
+        "status": "ok",
+        "connected_clients": len(connected_clients),
+        "stream_weather_entries": weather_len,
+        "stream_alerts_entries": alerts_len,
+        "last_update": last_update,
+    }
 
 
 if __name__ == "__main__":

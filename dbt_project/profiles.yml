@@ -1,0 +1,12 @@
+weather_intel:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: weather
+      password: "{{ env_var('WI_DB_PASSWORD', 'weather_local') }}"
+      dbname: weather_intel
+      schema: public
+      threads: 2
+  target: dev

@@ -5,3 +5,12 @@ __pycache__/
 data/raw/*.dly
 *.egg-info/
 .pytest_cache/
+dbt_project/target/
+dbt_project/logs/
+dbt_project/.user.yml
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/logs/
+airflow/airflow.cfg.override
+app/dashboard.html
+app/test_scoring.py

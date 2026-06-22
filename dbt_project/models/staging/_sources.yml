@@ -1,0 +1,35 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: public
+    tables:
+      - name: stations
+        description: "NOAA GHCN weather stations across Massachusetts"
+        columns:
+          - name: station_id
+            tests:
+              - unique
+              - not_null
+
+      - name: daily_weather
+        description: "Daily weather observations from NOAA GHCN fixed-width files"
+        columns:
+          - name: id
+            tests:
+              - unique
+              - not_null
+          - name: station_id
+            tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'stations')
+                  field: station_id
+
+      - name: jobs
+        description: "Stamped concrete jobs with location and revenue data"
+        columns:
+          - name: job_id
+            tests:
+              - unique
+              - not_null
