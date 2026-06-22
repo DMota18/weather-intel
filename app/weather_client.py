@@ -3,7 +3,7 @@
 import httpx
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from config import OPEN_METEO_FORECAST_URL, OPEN_METEO_HISTORY_URL
+from config import OPEN_METEO_FORECAST_URL
 
 ET = ZoneInfo("America/New_York")
 

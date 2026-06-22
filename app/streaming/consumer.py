@@ -7,16 +7,13 @@ Reads from Redis Streams and:
 3. Pushes real-time updates to connected dashboards
 """
 
-import asyncio
 import json
 import time
 import redis
-import psycopg2
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import DB_CONFIG
 
 REDIS = redis.Redis(host="localhost", port=6379, decode_responses=True)
 STREAM_WEATHER = "weather:updates"

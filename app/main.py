@@ -2,14 +2,13 @@
 
 import os
 import decimal
-import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 import asyncio
 import threading
 import redis
-from fastapi import FastAPI, Request, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import psycopg2

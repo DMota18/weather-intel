@@ -16,7 +16,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import STATIONS
-from scoring import score_pour_hour, score_sealer_hour
+from scoring import score_pour_hour
 
 REDIS = redis.Redis(host="localhost", port=6379, decode_responses=True)
 STREAM_WEATHER = "weather:updates"

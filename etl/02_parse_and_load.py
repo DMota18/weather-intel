@@ -276,10 +276,10 @@ def main():
         observations = parse_station_file(station_id, BACKFILL_START_YEAR)
         print(f"  Found {len(observations)} observation days")
 
-        print(f"  Transforming (unit conversion + scoring)...")
+        print("  Transforming (unit conversion + scoring)...")
         rows = transform_observations(observations)
 
-        print(f"  Loading to database...")
+        print("  Loading to database...")
         count = load_to_db(rows, conn)
         total_loaded += count
         print(f"  Loaded {count} rows")
