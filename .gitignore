@@ -14,3 +14,7 @@ airflow/logs/
 airflow/airflow.cfg.override
 app/dashboard.html
 app/test_scoring.py
+airflow/airflow-webserver.pid
+airflow/webserver_config.py
+data/raw/*.txt
+data/*.csv
