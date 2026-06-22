@@ -1,0 +1,141 @@
+name: CI — Test & Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Python Tests & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: weather
+          POSTGRES_PASSWORD: weather_local
+          POSTGRES_DB: weather_intel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint with ruff
+        run: ruff check app/ etl/ tests/ --select E,F,W --ignore E501
+
+      - name: Create schema
+        env:
+          PGPASSWORD: weather_local
+        run: |
+          psql -h localhost -U weather -d weather_intel -f sql/schema.sql
+
+      - name: Seed test data
+        env:
+          PGPASSWORD: weather_local
+        run: |
+          psql -h localhost -U weather -d weather_intel << 'SQL'
+          INSERT INTO stations (station_id, name, covers, state, latitude, longitude) VALUES
+          ('USW00094746', 'Worcester Regional', 'Central MA', 'MA', 42.2706, -71.8731),
+          ('USW00054769', 'Plymouth Municipal', 'South Shore', 'MA', 41.9086, -70.7278);
+          SQL
+
+      - name: Run pytest
+        run: pytest tests/ -v
+
+  dbt:
+    name: dbt Test
+    runs-on: ubuntu-latest
+    needs: test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: weather
+          POSTGRES_PASSWORD: weather_local
+          POSTGRES_DB: weather_intel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dbt
+        run: pip install 'dbt-postgres>=1.8,<1.10'
+
+      - name: Create schema and seed data
+        env:
+          PGPASSWORD: weather_local
+        run: |
+          psql -h localhost -U weather -d weather_intel -f sql/schema.sql
+          psql -h localhost -U weather -d weather_intel << 'SQL'
+          INSERT INTO stations (station_id, name, covers, state, latitude, longitude) VALUES
+          ('USW00094746', 'Worcester Regional', 'Central MA', 'MA', 42.2706, -71.8731),
+          ('USW00054769', 'Plymouth Municipal', 'South Shore', 'MA', 41.9086, -70.7278);
+
+          INSERT INTO daily_weather (station_id, observation_date, temp_max_f, temp_min_f, temp_mean_f, precip_in, wind_max_mph, pour_score, sealer_score, score_details)
+          VALUES
+          ('USW00094746', '2025-06-15', 78.0, 55.0, 66.5, 0.00, 8.0, 'green', 'green', '{}'),
+          ('USW00094746', '2025-06-16', 82.0, 60.0, 71.0, 0.10, 12.0, 'yellow', 'red', '{}'),
+          ('USW00094746', '2025-06-17', 70.0, 50.0, 60.0, 0.00, 5.0, 'green', 'green', '{}'),
+          ('USW00054769', '2025-06-15', 75.0, 58.0, 66.5, 0.00, 6.0, 'green', 'green', '{}'),
+          ('USW00054769', '2025-06-16', 80.0, 62.0, 71.0, 0.20, 15.0, 'red', 'red', '{}');
+
+          INSERT INTO jobs (job_id, start_date, completion_date, final_revenue, lead_name, address, job_type, concrete_type, lead_status, square_footage, station_id)
+          VALUES (1, '2025-06-15', '2025-06-17', 15000.00, 'Test Job', '123 Main St, Worcester, MA', 'patio', 'stamped', 'won', 500, 'USW00094746');
+          SQL
+
+      - name: dbt run
+        working-directory: dbt_project
+        run: dbt run --profiles-dir .
+
+      - name: dbt test
+        working-directory: dbt_project
+        run: dbt test --profiles-dir .
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [test, dbt]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 54.234.80.8
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/weather-intel
+            git pull origin main
+            ~/weather-intel/deploy.sh
