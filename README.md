@@ -1,5 +1,7 @@
 # Weather Intelligence System for Stamped Concrete
 
+![CI](https://github.com/DMota18/weather-intel/actions/workflows/ci.yml/badge.svg)
+
 A full-stack weather intelligence tool that ingests raw NOAA data, scores conditions for concrete pouring and sealer application, and serves live forecasts through a FastAPI application. Built for a stamped concrete business in Massachusetts — used daily for scheduling decisions.
 
 ## The Problem

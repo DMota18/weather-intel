@@ -37,10 +37,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install ruff
+          pip install ruff sqlfluff sqlfluff-templater-dbt 'dbt-postgres>=1.8,<1.10'
 
-      - name: Lint with ruff
+      - name: Lint Python with ruff
         run: ruff check app/ etl/ tests/ --select E,F,W --ignore E501
+
+      - name: Lint SQL with sqlfluff
+        run: sqlfluff lint dbt_project/models/ --dialect postgres --ignore templating
 
       - name: Create schema
         env:
