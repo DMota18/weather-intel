@@ -1,6 +1,6 @@
 [sqlfluff]
 dialect = postgres
-templater = dbt
+templater = jinja
 max_line_length = 120
 
 [sqlfluff:indentation]
@@ -12,3 +12,11 @@ capitalisation_policy = lower
 
 [sqlfluff:rules:capitalisation.functions]
 capitalisation_policy = lower
+
+[sqlfluff:templater:jinja:context]
+ref = ref
+source = source
+
+[sqlfluff:rules]
+# Skip rules that conflict with dbt Jinja templates
+exclude_rules = RF01, PRS, ST06, AL01

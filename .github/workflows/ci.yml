@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install ruff sqlfluff sqlfluff-templater-dbt 'dbt-postgres>=1.8,<1.10'
+          pip install ruff sqlfluff
 
       - name: Lint Python with ruff
         run: ruff check app/ etl/ tests/ --select E,F,W --ignore E501
