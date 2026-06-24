@@ -18,3 +18,4 @@ airflow/airflow-webserver.pid
 airflow/webserver_config.py
 data/raw/*.txt
 data/*.csv
+gcp-key.json
