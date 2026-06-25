@@ -482,6 +482,12 @@ async def get_job_weather(job_id: int):
 # DASHBOARD
 # ============================================================
 
+@app.get("/about", response_class=HTMLResponse)
+async def about_page(request: Request):
+    """About page — explains the project for non-technical visitors."""
+    return templates.TemplateResponse(request, "about.html", {"request": request})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, town: str = "worcester"):
     """Main dashboard page."""

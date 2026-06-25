@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About — Weather Intel</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            background: #000000;
+            color: #e2e8f0;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px; }
+        h2 { font-size: 1rem; font-weight: 600; margin: 28px 0 10px; color: #ffffff; }
+        p { color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-bottom: 14px; }
+        a { color: #0a84ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .back { display: inline-block; margin-bottom: 20px; font-size: 0.85rem; color: #0a84ff; }
+        .tag {
+            display: inline-block;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.5);
+            margin: 2px 2px;
+        }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 16px 0;
+        }
+        .stat {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+        }
+        .stat-num { font-size: 1.5rem; font-weight: 700; color: #ffffff; }
+        .stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+        .arch {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.6);
+            line-height: 1.8;
+            overflow-x: auto;
+            margin: 16px 0;
+        }
+        .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 30px 0; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back">&larr; Back to Dashboard</a>
+
+    <h1>Weather Intel</h1>
+    <p>A weather intelligence platform built for a stamped concrete business in Massachusetts.</p>
+
+    <h2>The Problem</h2>
+    <p>Concrete work depends on weather. Too cold and it won't cure. Too hot and it cracks. Rain ruins a fresh pour. Wind dries the surface wrong. Sealer needs a full day of dry conditions before and after application.</p>
+    <p>Standard weather apps say "72°F, partly cloudy." That doesn't answer the question a concrete crew needs answered at 6AM: <strong>can we work today?</strong></p>
+
+    <h2>The Solution</h2>
+    <p>This platform scores weather conditions specifically for concrete work — green, yellow, or red — for pouring, sealer application, and post-pour curing. It checks temperature, humidity, wind, precipitation, and dew point against industry thresholds and gives a go/no-go verdict with a recommended work window.</p>
+    <p>The 48-hour forecast shows exactly which hours are safe. The sealer check looks backward (did it rain in the last 24 hours?) and forward (will it rain in the next 24?). The cure check evaluates whether the next 48 hours are safe for fresh concrete to harden.</p>
+
+    <h2>The Data</h2>
+    <p>Historical weather data comes from NOAA — the same government agency that runs the National Weather Service. Their raw files are notoriously messy: fixed-width text formats, missing values coded as -9999, temperatures stored in tenths of degrees Celsius. This platform cleans, converts, and validates that data automatically.</p>
+    <p>Live forecasts come from Open-Meteo, updated every 15 minutes via a real-time streaming pipeline. Severe weather alerts from the National Weather Service are monitored and pushed to the dashboard.</p>
+
+    <div class="stat-grid">
+        <div class="stat">
+            <div class="stat-num">18,000+</div>
+            <div class="stat-label">Daily Weather Records</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">10</div>
+            <div class="stat-label">MA Weather Stations</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">45</div>
+            <div class="stat-label">Jobs Tracked</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">60</div>
+            <div class="stat-label">Automated Tests</div>
+        </div>
+    </div>
+
+    <h2>How It's Built</h2>
+    <div class="arch">
+        NOAA Raw Data &rarr; Python ETL &rarr; PostgreSQL<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;dbt (transform + test)<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
+        Airflow (orchestrate) &rarr; BigQuery (warehouse)<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
+        Redis Streams &rarr; FastAPI + WebSocket &rarr; Dashboard<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
+        GitHub Actions CI/CD &rarr; Auto-deploy to EC2
+    </div>
+
+    <div style="margin: 16px 0;">
+        <span class="tag">Python</span>
+        <span class="tag">PostgreSQL</span>
+        <span class="tag">dbt</span>
+        <span class="tag">Apache Airflow</span>
+        <span class="tag">Redis Streams</span>
+        <span class="tag">Google BigQuery</span>
+        <span class="tag">FastAPI</span>
+        <span class="tag">WebSocket</span>
+        <span class="tag">GitHub Actions</span>
+        <span class="tag">AWS EC2</span>
+        <span class="tag">nginx</span>
+        <span class="tag">Let's Encrypt</span>
+    </div>
+
+    <h2>Built By</h2>
+    <p>Dylan Mota — concrete contractor and data engineer based in Massachusetts. This platform is a working business tool and a portfolio project demonstrating end-to-end data engineering.</p>
+    <p><a href="https://github.com/DMota18/weather-intel">View the code on GitHub &rarr;</a></p>
+
+    <div class="footer">Weather Intel &middot; Built with real data for a real business</div>
+</body>
+</html>
