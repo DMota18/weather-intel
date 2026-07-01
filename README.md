@@ -48,6 +48,7 @@ NOAA Weather Data (messy)        Open-Meteo (live forecasts)
    (operational)   (orchestration)  (analytical warehouse)
         ↓                                ↓
       dbt (10 models, 32 tests)    Tableau / ad-hoc queries
+      (transforms Postgres)        (raw sync from Postgres)
         ↓
    FastAPI + WebSocket
         ↓
@@ -62,10 +63,10 @@ NOAA Weather Data (messy)        Open-Meteo (live forecasts)
 | **Data Sources** | NOAA GHCN-Daily, Open-Meteo, NWS Alerts | Historical weather, forecasts, severe weather |
 | **ETL** | Python, psycopg2 | Parse fixed-width files, convert units, filter quality flags |
 | **Database** | PostgreSQL 16 | Operational store — 18,000+ daily observations, 45 jobs |
-| **Transformations** | dbt (10 models, 32 tests) | Staging → intermediate → marts with automated validation |
+| **Transformations** | dbt (10 models, 32 tests) | Staging → intermediate → marts on Postgres with automated validation |
 | **Orchestration** | Apache Airflow (4 DAGs) | Daily ETL, hourly forecast cache, weekly backfill, BigQuery sync |
 | **Streaming** | Redis Streams + WebSocket | Real-time weather updates every 15 min, NWS alert monitoring |
-| **Warehouse** | Google BigQuery | Analytical layer — same data, optimized for Tableau and ad-hoc queries |
+| **Warehouse** | Google BigQuery | Analytical layer — daily sync from Postgres for Tableau and ad-hoc queries |
 | **API** | FastAPI | REST endpoints + WebSocket for live dashboard updates |
 | **CI/CD** | GitHub Actions | Lint (ruff + sqlfluff) → test (pytest + dbt) → deploy to EC2 |
 | **Infrastructure** | AWS EC2, nginx, Let's Encrypt | HTTPS, reverse proxy, systemd services — $1.30/month |
@@ -76,9 +77,9 @@ The system doesn't just load data — it validates it:
 
 - **32 dbt tests**: referential integrity, accepted values, not-null constraints, uniqueness
 - **3 custom assertions**: temperatures within realistic bounds (-40 to 120°F), no future dates, every job has matching weather
-- **28 pytest unit tests**: scoring engine boundary values, None handling, best-window algorithm
+- **43 pytest tests**: 28 unit tests (scoring engine) + 15 integration tests (API endpoints)
 - **Data coverage audit**: tracks per-station completeness (Worcester: 100%, Chicopee: 25.7%)
-- **60 total automated tests** gate every deployment
+- **75 total automated tests** gate every deployment
 
 ## Analytical Queries
 
@@ -133,7 +134,7 @@ cd ../app && uvicorn main:app --host 0.0.0.0 --port 8000
 ## Tests
 
 ```bash
-pytest tests/ -v                              # 28 Python tests
+pytest tests/ -v                              # 43 Python tests (28 unit + 15 integration)
 cd dbt_project && dbt test --profiles-dir .   # 32 data tests
 ```
 
