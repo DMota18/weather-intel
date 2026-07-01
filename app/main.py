@@ -630,13 +630,10 @@ async def start_redis_listener():
 
 @app.websocket("/ws/live")
 async def websocket_live(ws: WebSocket):
-    """Real-time weather updates via WebSocket.
-
-    Clients connect and receive JSON messages whenever:
-    - Weather conditions update (every 15 min)
-    - Pour/sealer scores change
-    - NWS issues a severe weather alert relevant to concrete work
-    """
+    """Real-time weather updates via WebSocket."""
+    if len(connected_clients) >= 50:
+        await ws.close(code=1013)
+        return
     await ws.accept()
     connected_clients.append(ws)
     try:
