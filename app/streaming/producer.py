@@ -8,11 +8,19 @@ Also monitors NWS Alert API for severe weather in Massachusetts.
 
 import asyncio
 import json
+import logging
 import time
 import redis
 import httpx
 import sys
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"time":"%(asctime)s","level":"%(levelname)s","module":"producer","message":"%(message)s"}',
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("producer")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import STATIONS
@@ -138,39 +146,36 @@ def publish_alert(alert_feature):
 
 
 async def weather_loop():
-    print("Starting weather producer (15-min interval)...")
+    logger.info("Starting weather producer (15-min interval)")
     while True:
         for slug, info in STATIONS.items():
             try:
                 current = await fetch_current(info["lat"], info["lon"])
                 score, last = publish_weather_update(slug, info, current)
                 status = f"CHANGED {last}->{score}" if last and last != score else score
-                print(f"  {slug}: {info['name']} -> {status}")
+                logger.info("%s: %s -> %s", slug, info['name'], status)
             except Exception as e:
-                print(f"  {slug}: ERROR - {e}")
-        print(f"Next poll in {POLL_INTERVAL}s...")
+                logger.error("%s: %s", slug, e)
+        logger.info("Next poll in %ds", POLL_INTERVAL)
         await asyncio.sleep(POLL_INTERVAL)
 
 
 async def alert_loop():
-    print("Starting NWS alert monitor (5-min interval)...")
+    logger.info("Starting NWS alert monitor (5-min interval)")
     while True:
         try:
             alerts = await fetch_nws_alerts()
             new_count = sum(1 for a in alerts if publish_alert(a))
             if new_count:
-                print(f"  Published {new_count} new concrete-relevant alerts")
+                logger.warning("Published %d new concrete-relevant alerts", new_count)
         except Exception as e:
-            print(f"  NWS alert check failed: {e}")
+            logger.error("NWS alert check failed: %s", e)
         await asyncio.sleep(NWS_POLL_INTERVAL)
 
 
 async def main():
-    print("Weather Stream Producer starting...")
-    print(f"  Stations: {len(STATIONS)}")
-    print(f"  Weather poll: every {POLL_INTERVAL}s")
-    print(f"  Alert poll: every {NWS_POLL_INTERVAL}s")
-    print(f"  Redis streams: {STREAM_WEATHER}, {STREAM_ALERTS}")
+    logger.info("Weather Stream Producer starting — %d stations, poll=%ds, alerts=%ds",
+                len(STATIONS), POLL_INTERVAL, NWS_POLL_INTERVAL)
     await asyncio.gather(weather_loop(), alert_loop())
 
 

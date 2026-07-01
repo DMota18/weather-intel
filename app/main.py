@@ -2,12 +2,20 @@
 
 import os
 import decimal
+import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 import asyncio
 import threading
 import redis
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"time":"%(asctime)s","level":"%(levelname)s","module":"%(module)s","message":"%(message)s"}',
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("weather-intel")
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -27,6 +35,7 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 
 # --- Connection pool (fix #8) ---
 db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, **DB_CONFIG)
+logger.info("Database connection pool initialized")
 
 
 @contextmanager
@@ -48,14 +57,17 @@ def _get_cached_forecast(station_id: str, cache_type: str):
     if key in _forecast_cache:
         data, fetched_at = _forecast_cache[key]
         if datetime.now(ET) - fetched_at < FORECAST_CACHE_TTL:
+            logger.debug("Cache hit: %s", key)
             return data
         del _forecast_cache[key]
+    logger.debug("Cache miss: %s", key)
     return None
 
 
 def _set_cached_forecast(station_id: str, cache_type: str, data):
     key = f"{station_id}:{cache_type}"
     _forecast_cache[key] = (data, datetime.now(ET))
+    logger.info("Cached forecast: %s", key)
 
 
 # --- Station name lookup ---
@@ -488,6 +500,14 @@ async def about_page(request: Request):
     return templates.TemplateResponse(request, "about.html", {"request": request})
 
 
+from fastapi.staticfiles import StaticFiles
+
+dbt_docs_path = os.path.join(os.path.dirname(__file__), "..", "dbt_project", "target")
+if os.path.isdir(dbt_docs_path):
+    app.mount("/dbt-docs", StaticFiles(directory=dbt_docs_path, html=True), name="dbt-docs")
+    logger.info("dbt docs mounted at /dbt-docs")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, town: str = "worcester"):
     """Main dashboard page."""
@@ -630,20 +650,20 @@ async def start_redis_listener():
 
 @app.websocket("/ws/live")
 async def websocket_live(ws: WebSocket):
-    """Real-time weather updates via WebSocket.
-
-    Clients connect and receive JSON messages whenever:
-    - Weather conditions update (every 15 min)
-    - Pour/sealer scores change
-    - NWS issues a severe weather alert relevant to concrete work
-    """
+    """Real-time weather updates via WebSocket."""
+    if len(connected_clients) >= 50:
+        logger.warning("WebSocket rejected — max connections reached")
+        await ws.close(code=1013)
+        return
     await ws.accept()
     connected_clients.append(ws)
+    logger.info("WebSocket connected — %d active", len(connected_clients))
     try:
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
         connected_clients.remove(ws)
+        logger.info("WebSocket disconnected — %d active", len(connected_clients))
 
 
 @app.get("/api/v1/stream/status")

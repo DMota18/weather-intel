@@ -5,9 +5,13 @@ Runs every day at 6AM ET. NOAA updates their files with ~1-2 day lag,
 so this catches yesterday's observations.
 """
 
+import sys
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+
+sys.path.insert(0, "/home/ubuntu/weather-intel/scripts")
+from alert_on_failure import on_failure
 
 VENV = "/home/ubuntu/weather-intel/venv/bin"
 PROJECT = "/home/ubuntu/weather-intel"
@@ -17,7 +21,7 @@ DBT_PROFILES = f"--profiles-dir {DBT_DIR}"
 default_args = {
     "owner": "dylan",
     "depends_on_past": False,
-    "email_on_failure": False,
+    "on_failure_callback": on_failure,
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
 }

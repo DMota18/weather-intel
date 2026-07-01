@@ -5,9 +5,13 @@ Runs every Sunday at 5AM ET. Re-downloads all station files to catch any
 NOAA retroactive corrections, then does a full dbt run + materialized view refresh.
 """
 
+import sys
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+
+sys.path.insert(0, "/home/ubuntu/weather-intel/scripts")
+from alert_on_failure import on_failure
 
 VENV = "/home/ubuntu/weather-intel/venv/bin"
 PROJECT = "/home/ubuntu/weather-intel"
@@ -17,7 +21,7 @@ DBT_PROFILES = f"--profiles-dir {DBT_DIR}"
 default_args = {
     "owner": "dylan",
     "depends_on_past": False,
-    "email_on_failure": False,
+    "on_failure_callback": on_failure,
     "retries": 1,
     "retry_delay": timedelta(minutes=10),
 }

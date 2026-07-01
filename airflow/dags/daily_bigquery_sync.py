@@ -5,9 +5,13 @@ Runs daily after the ETL DAG completes. Keeps the analytical warehouse
 in sync with the operational database.
 """
 
+import sys
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+
+sys.path.insert(0, "/home/ubuntu/weather-intel/scripts")
+from alert_on_failure import on_failure
 
 VENV = "/home/ubuntu/weather-intel/venv/bin"
 PROJECT = "/home/ubuntu/weather-intel"
@@ -15,7 +19,7 @@ PROJECT = "/home/ubuntu/weather-intel"
 default_args = {
     "owner": "dylan",
     "depends_on_past": False,
-    "email_on_failure": False,
+    "on_failure_callback": on_failure,
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
 }

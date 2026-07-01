@@ -2,33 +2,36 @@
 Weather Stream Consumer
 
 Reads from Redis Streams and:
-1. Updates the Postgres forecast cache with latest conditions
-2. Maintains a list of active WebSocket connections
-3. Pushes real-time updates to connected dashboards
+1. Maintains a list of active WebSocket connections
+2. Pushes real-time updates to connected dashboards
 """
 
 import json
+import logging
 import time
 import redis
 import sys
 import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"time":"%(asctime)s","level":"%(levelname)s","module":"consumer","message":"%(message)s"}',
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("consumer")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 REDIS = redis.Redis(host="localhost", port=6379, decode_responses=True)
 STREAM_WEATHER = "weather:updates"
 STREAM_ALERTS = "weather:alerts"
-
-# WebSocket connections managed by the FastAPI app — consumer writes to a pubsub channel
 PUBSUB_CHANNEL = "weather:live"
 
 
 def process_weather_update(message):
-    """Store latest conditions and notify WebSocket subscribers."""
     station = message.get("station", "")
     score_changed = message.get("score_changed") == "1"
 
-    # Publish to Redis pubsub for WebSocket broadcast
     payload = {
         "type": "weather_update",
         "station": station,
@@ -44,11 +47,10 @@ def process_weather_update(message):
     REDIS.publish(PUBSUB_CHANNEL, json.dumps(payload))
 
     if score_changed:
-        print(f"  SCORE CHANGE: {station} -> {message.get('pour_score')}")
+        logger.warning("SCORE CHANGE: %s -> %s", station, message.get("pour_score"))
 
 
 def process_alert(message):
-    """Forward NWS alert to WebSocket subscribers."""
     payload = {
         "type": "nws_alert",
         "event": message.get("event", ""),
@@ -59,13 +61,11 @@ def process_alert(message):
         "expires": message.get("expires", ""),
     }
     REDIS.publish(PUBSUB_CHANNEL, json.dumps(payload))
-    print(f"  ALERT: {message.get('event')} - {message.get('headline')}")
+    logger.warning("ALERT: %s - %s", message.get("event"), message.get("headline"))
 
 
 def run():
-    print("Weather Stream Consumer starting...")
-    print(f"  Reading: {STREAM_WEATHER}, {STREAM_ALERTS}")
-    print(f"  Publishing to: {PUBSUB_CHANNEL}")
+    logger.info("Weather Stream Consumer starting — reading %s, %s", STREAM_WEATHER, STREAM_ALERTS)
 
     last_ids = {
         STREAM_WEATHER: "$",
@@ -91,10 +91,10 @@ def run():
                         process_alert(msg_data)
 
         except redis.ConnectionError:
-            print("Redis connection lost, reconnecting...")
+            logger.error("Redis connection lost, reconnecting in 5s")
             time.sleep(5)
         except Exception as e:
-            print(f"Consumer error: {e}")
+            logger.error("Consumer error: %s", e)
             time.sleep(1)
 
 
