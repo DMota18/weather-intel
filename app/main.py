@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 import asyncio
 import threading
+import time
 import redis
 
 logging.basicConfig(
@@ -25,7 +26,7 @@ import psycopg2.extras
 
 from config import DB_CONFIG, STATIONS
 from weather_client import fetch_forecast_48h, fetch_last_24h, parse_forecast_hours, parse_history_hours
-from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window
+from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window, summarize_day
 
 ET = ZoneInfo("America/New_York")
 
@@ -34,29 +35,53 @@ app = FastAPI(title="Weather Intelligence", version="1.1.0")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 # --- Connection pool (fix #8) ---
-db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, **DB_CONFIG)
-logger.info("Database connection pool initialized")
+# Created lazily so a down database doesn't prevent the app — and its
+# DB-free forecast/sealer/cure endpoints — from starting at all.
+db_pool = None
+_db_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global db_pool
+    if db_pool is None:
+        with _db_pool_lock:
+            if db_pool is None:
+                db_pool = psycopg2.pool.SimpleConnectionPool(1, 5, **DB_CONFIG)
+                logger.info("Database connection pool initialized")
+    return db_pool
 
 
 @contextmanager
 def get_db():
-    conn = db_pool.getconn()
+    try:
+        pool = _get_pool()
+        conn = pool.getconn()
+    except (psycopg2.Error, psycopg2.pool.PoolError) as e:
+        logger.error("Database unavailable: %s", e)
+        raise HTTPException(status_code=503, detail="Database unavailable")
     try:
         yield conn
     finally:
-        db_pool.putconn(conn)
+        pool.putconn(conn)
 
 
 # --- Forecast cache (fix #9) ---
-FORECAST_CACHE_TTL = timedelta(hours=3)
+# History feeds the "rain in last 24h" sealer rule — it must see recent rain
+# quickly, so it gets a shorter TTL than the forward-looking forecast.
+FORECAST_CACHE_TTL = timedelta(hours=1)
+HISTORY_CACHE_TTL = timedelta(minutes=30)
 _forecast_cache = {}
+
+
+def _cache_ttl(cache_type: str) -> timedelta:
+    return HISTORY_CACHE_TTL if cache_type.startswith("history") else FORECAST_CACHE_TTL
 
 
 def _get_cached_forecast(station_id: str, cache_type: str):
     key = f"{station_id}:{cache_type}"
     if key in _forecast_cache:
         data, fetched_at = _forecast_cache[key]
-        if datetime.now(ET) - fetched_at < FORECAST_CACHE_TTL:
+        if datetime.now(ET) - fetched_at < _cache_ttl(cache_type):
             logger.debug("Cache hit: %s", key)
             return data
         del _forecast_cache[key]
@@ -96,6 +121,60 @@ def _parse_date(date_str: str) -> str:
         return date_str
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid date format: {date_str}. Use YYYY-MM-DD.")
+
+
+# --- Hour-slicing helpers ---
+# Open-Meteo date-range responses cover whole calendar days (00:00–23:00
+# local), so "last 24h" and "next 24h" must be sliced by actual timestamps,
+# never by list position — list position includes future hours of today.
+
+def _hour_dt(h):
+    return datetime.fromisoformat(h["time"]).replace(tzinfo=ET)
+
+
+def _last_24h(hours):
+    """Hours from the true last 24 hours: (now - 24h) .. now."""
+    now = datetime.now(ET)
+    return [h for h in hours if now - timedelta(hours=24) <= _hour_dt(h) <= now]
+
+
+def _upcoming_hours(hours):
+    """Drop hours that have already passed (cached forecasts age)."""
+    cutoff = datetime.now(ET).replace(minute=0, second=0, microsecond=0)
+    return [h for h in hours if _hour_dt(h) >= cutoff]
+
+
+def _sealer_inputs(history_hours, forecast_hours):
+    """Derive sealer-scoring inputs, treating data gaps as unknown (None).
+
+    Missing data must never read as "dry": a precip total with material
+    gaps or a rain-probability check with poor coverage comes back None so
+    score_sealer_hour caps the verdict instead of assuming clear weather.
+    Known rain is kept even with gaps — gaps can't un-rain observed hours.
+    """
+    recent_hours = _last_24h(history_hours)
+
+    known_precip = [h["precip_in"] for h in recent_hours if h["precip_in"] is not None]
+    known_total = sum(known_precip)
+    full_coverage = len(recent_hours) >= 20 and len(known_precip) >= len(recent_hours) - 2
+    if full_coverage:
+        total_precip_24h = known_total
+    elif known_total >= 0.1:
+        total_precip_24h = known_total
+    else:
+        total_precip_24h = None
+
+    next_24h = _upcoming_hours(forecast_hours)[:24]
+    probs = [h["precip_prob_pct"] for h in next_24h if h["precip_prob_pct"] is not None]
+    if len(probs) >= 20:
+        max_precip_prob = max(probs)
+    elif probs and max(probs) >= 40:
+        max_precip_prob = max(probs)
+    else:
+        max_precip_prob = None
+
+    current = recent_hours[-1] if recent_hours else {}
+    return recent_hours, next_24h, total_precip_24h, max_precip_prob, current
 
 
 # --- Helpers ---
@@ -143,6 +222,8 @@ async def get_forecast(town: str):
         hours = parse_forecast_hours(data)
         _set_cached_forecast(station["station_id"], "forecast48", hours)
 
+    hours = _upcoming_hours(hours)
+
     scored_hours = []
     for h in hours:
         score, factors = score_pour_hour(
@@ -165,13 +246,8 @@ async def get_forecast(town: str):
 
     day_summaries = []
     for day_key, day_hours in days.items():
-        scores = [h["pour_score"] for h in day_hours if h["pour_score"] and 7 <= h["hour"] <= 17]
-        if "red" in scores:
-            day_score = "red"
-        elif "yellow" in scores:
-            day_score = "yellow"
-        else:
-            day_score = "green"
+        # None = no scorable working hours — surfaced as "no data", never green
+        day_score = summarize_day(day_hours)
 
         temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
         day_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours])
@@ -229,17 +305,14 @@ async def sealer_check(town: str):
         forecast_hours = parse_forecast_hours(forecast_data)
         _set_cached_forecast(station["station_id"], "forecast48", forecast_hours)
 
-    recent_hours = history_hours[-24:] if len(history_hours) >= 24 else history_hours
+    recent_hours, next_24h, total_precip_24h, max_precip_prob, current = _sealer_inputs(
+        history_hours, forecast_hours
+    )
 
-    total_precip_24h = sum(h["precip_in"] or 0 for h in recent_hours)
-    max_humidity = max((h["humidity_pct"] or 0) for h in recent_hours) if recent_hours else None
+    humidities = [h["humidity_pct"] for h in recent_hours if h["humidity_pct"] is not None]
+    max_humidity = max(humidities) if humidities else None
     min_temp = min((h["temp_f"] for h in recent_hours if h["temp_f"] is not None), default=None)
     max_temp = max((h["temp_f"] for h in recent_hours if h["temp_f"] is not None), default=None)
-
-    next_24h = forecast_hours[:24]
-    max_precip_prob = max((h["precip_prob_pct"] or 0) for h in next_24h) if next_24h else None
-
-    current = recent_hours[-1] if recent_hours else {}
 
     score, factors = score_sealer_hour(
         temp_f=current.get("temp_f"),
@@ -250,7 +323,9 @@ async def sealer_check(town: str):
     )
 
     details = []
-    if total_precip_24h == 0:
+    if total_precip_24h is None:
+        details.append("Rain in last 24h: unknown (missing data)")
+    elif total_precip_24h == 0:
         details.append("No rain in last 24h")
     else:
         details.append(f"Rain in last 24h: {total_precip_24h:.2f} in")
@@ -269,7 +344,10 @@ async def sealer_check(town: str):
         "town": station["name"],
         "covers": station["covers"],
         "score": score,
-        "verdict": "SAFE TO SEAL" if score == "green" else ("USE CAUTION" if score == "yellow" else "DO NOT SEAL"),
+        "verdict": ("SAFE TO SEAL" if score == "green"
+                    else "USE CAUTION" if score == "yellow"
+                    else "DO NOT SEAL" if score == "red"
+                    else "NO DATA — DO NOT SEAL"),
         "factors": factors,
         "details": details,
         "current": {
@@ -279,7 +357,7 @@ async def sealer_check(town: str):
             "wind_mph": current.get("wind_mph"),
         },
         "last_24h": {
-            "total_precip_in": round(total_precip_24h, 2),
+            "total_precip_in": round(total_precip_24h, 2) if total_precip_24h is not None else None,
             "temp_low_f": min_temp,
             "temp_high_f": max_temp,
             "max_humidity_pct": max_humidity,
@@ -352,6 +430,8 @@ async def cure_check(town: str):
         forecast_hours = parse_forecast_hours(data)
         _set_cached_forecast(station["station_id"], "forecast48", forecast_hours)
 
+    forecast_hours = _upcoming_hours(forecast_hours)
+
     overall, factors, issues = score_cure_window(forecast_hours)
 
     temps = [h["temp_f"] for h in forecast_hours if h.get("temp_f") is not None]
@@ -360,7 +440,10 @@ async def cure_check(town: str):
         "town": station["name"],
         "covers": station["covers"],
         "score": overall,
-        "verdict": "SAFE TO POUR & CURE" if overall == "green" else ("POUR WITH CAUTION" if overall == "yellow" else "DO NOT POUR"),
+        "verdict": ("SAFE TO POUR & CURE" if overall == "green"
+                    else "POUR WITH CAUTION" if overall == "yellow"
+                    else "DO NOT POUR" if overall == "red"
+                    else "NO DATA — DO NOT POUR"),
         "factors": factors,
         "issues": issues,
         "window": {
@@ -538,6 +621,8 @@ async def dashboard(request: Request, town: str = "worcester"):
     except Exception:
         history_hours = []
 
+    forecast_hours = _upcoming_hours(forecast_hours)
+
     scored_forecast = []
     for h in forecast_hours:
         score, factors = score_pour_hour(
@@ -549,11 +634,9 @@ async def dashboard(request: Request, town: str = "worcester"):
         )
         scored_forecast.append({**h, "pour_score": score, "pour_factors": factors})
 
-    recent_hours = history_hours[-24:] if len(history_hours) >= 24 else history_hours
-    total_precip_24h = sum(h["precip_in"] or 0 for h in recent_hours)
-    next_24h = forecast_hours[:24]
-    max_precip_prob = max((h["precip_prob_pct"] or 0) for h in next_24h) if next_24h else 0
-    current = recent_hours[-1] if recent_hours else {}
+    recent_hours, next_24h, total_precip_24h, max_precip_prob, current = _sealer_inputs(
+        history_hours, forecast_hours
+    )
 
     sealer_score, sealer_factors = score_sealer_hour(
         temp_f=current.get("temp_f"),
@@ -572,8 +655,8 @@ async def dashboard(request: Request, town: str = "worcester"):
 
     day_summaries = []
     for day_key, day_hours in days.items():
-        scores = [h["pour_score"] for h in day_hours if h["pour_score"] and 7 <= h["hour"] <= 17]
-        day_score = "red" if "red" in scores else ("yellow" if "yellow" in scores else "green")
+        # None = no scorable working hours — surfaced as "no data", never green
+        day_score = summarize_day(day_hours)
         temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
         day_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours])
         day_summaries.append({
@@ -593,11 +676,11 @@ async def dashboard(request: Request, town: str = "worcester"):
         "sealer_score": sealer_score,
         "sealer_factors": sealer_factors,
         "sealer_details": {
-            "total_precip_24h": round(total_precip_24h, 2),
+            "total_precip_24h": round(total_precip_24h, 2) if total_precip_24h is not None else None,
             "current_temp": current.get("temp_f"),
             "current_humidity": current.get("humidity_pct"),
             "max_precip_prob": max_precip_prob,
-            "dewpoint_spread": round(current["temp_f"] - current["dewpoint_f"], 1) if current.get("temp_f") and current.get("dewpoint_f") else None,
+            "dewpoint_spread": round(current["temp_f"] - current["dewpoint_f"], 1) if current.get("temp_f") is not None and current.get("dewpoint_f") is not None else None,
         },
         "days": day_summaries,
         "forecast_hours": scored_forecast,
@@ -614,18 +697,26 @@ PUBSUB_CHANNEL = "weather:live"
 
 
 async def redis_listener():
-    """Background task: subscribe to Redis pubsub and broadcast to WebSocket clients."""
-    r = redis.Redis(host="localhost", port=6379, decode_responses=True)
-    pubsub = r.pubsub()
-    pubsub.subscribe(PUBSUB_CHANNEL)
+    """Background task: subscribe to Redis pubsub and broadcast to WebSocket clients.
 
+    Connects inside the thread and reconnects on failure — a down Redis must
+    never prevent the app (and the pour/seal/cure verdicts) from serving.
+    """
     loop = asyncio.get_event_loop()
 
     def _listen():
-        for message in pubsub.listen():
-            if message["type"] == "message":
-                data = message["data"]
-                asyncio.run_coroutine_threadsafe(_broadcast(data), loop)
+        while True:
+            try:
+                r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+                pubsub = r.pubsub()
+                pubsub.subscribe(PUBSUB_CHANNEL)
+                logger.info("Redis pubsub connected")
+                for message in pubsub.listen():
+                    if message["type"] == "message":
+                        asyncio.run_coroutine_threadsafe(_broadcast(message["data"]), loop)
+            except Exception as e:
+                logger.error("Redis listener error — live updates paused, retrying in 10s: %s", e)
+                time.sleep(10)
 
     thread = threading.Thread(target=_listen, daemon=True)
     thread.start()
@@ -645,7 +736,10 @@ async def _broadcast(data: str):
 
 @app.on_event("startup")
 async def start_redis_listener():
-    await redis_listener()
+    try:
+        await redis_listener()
+    except Exception as e:
+        logger.error("Redis listener failed to start — live updates disabled: %s", e)
 
 
 @app.websocket("/ws/live")

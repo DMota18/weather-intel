@@ -39,7 +39,13 @@ async def fetch_forecast_48h(lat: float, lon: float) -> dict:
 
 
 async def fetch_last_24h(lat: float, lon: float) -> dict:
-    """Fetch last 24 hours of actual weather from Open-Meteo."""
+    """Fetch recent weather from Open-Meteo (yesterday + today).
+
+    NOTE: the response covers whole calendar days — yesterday 00:00 through
+    today 23:00 local, with hours after "now" filled with FORECAST values.
+    Callers must slice to the true last 24 hours by timestamp; taking the
+    tail of the list gives today-including-future, not the last 24h.
+    """
     now = datetime.now(ET)
     end_date = now.strftime("%Y-%m-%d")
     start_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")

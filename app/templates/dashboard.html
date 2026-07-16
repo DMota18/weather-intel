@@ -65,6 +65,7 @@
         .vb-yellow { background: rgba(255,204,0,0.2); color: #ffcc00; }
         .vb-red { background: rgba(255,69,58,0.2); color: #ff453a; }
         .vb-blue { background: rgba(10,132,255,0.2); color: #0a84ff; }
+        .vb-gray { background: rgba(142,142,147,0.18); color: #98989d; }
         .vb-clickable { cursor: pointer; }
 
         /* ---- Detail panel (slide-down on click) ---- */
@@ -103,6 +104,7 @@
         .dp-dot-green { background: #34c759; }
         .dp-dot-yellow { background: #ffcc00; }
         .dp-dot-red { background: #ff453a; }
+        .dp-dot-gray { background: #98989d; }
         .dp-threshold {
             font-size: 0.6rem;
             color: rgba(255,255,255,0.25);
@@ -274,7 +276,7 @@
             <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
             {% endfor %}
         </select>
-        <div class="current-temp">{{ now.temp_f|round(0)|int if now.temp_f else '—' }}°</div>
+        <div class="current-temp">{{ now.temp_f|round(0)|int if now.temp_f is not none else '—' }}°</div>
         <div class="current-desc">
             {% if (now.precip_prob_pct or 0) >= 40 %}Rain Likely
             {% elif (now.precip_prob_pct or 0) >= 15 %}Chance of Rain
@@ -282,15 +284,15 @@
             {% elif (now.cloud_cover_pct or 0) >= 30 %}Partly Cloudy
             {% else %}Clear{% endif %}
         </div>
-        {% if today %}
+        {% if today and today.temp_high is not none and today.temp_low is not none %}
         <div class="current-hilo">H:{{ today.temp_high|round(0)|int }}°  L:{{ today.temp_low|round(0)|int }}°</div>
         {% endif %}
     </div>
 
     <!-- VERDICTS (clickable) -->
     <div class="verdict-bar">
-        <span class="vb vb-{{ sealer_score or 'yellow' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
-        <span class="vb vb-{{ today.score if today else 'yellow' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
+        <span class="vb vb-{{ sealer_score or 'gray' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% elif sealer_score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
+        <span class="vb vb-{{ (today.score or 'gray') if today else 'gray' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% elif today and today.score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
         {% if today and today.best_window %}
         <span class="vb vb-blue">{{ today.best_window }}</span>
         {% endif %}
@@ -311,10 +313,10 @@
             {% endfor %}
             <div class="dp-threshold">
                 <strong>Current readings:</strong><br>
-                {% if sealer_details.current_temp %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
-                {% if sealer_details.current_humidity %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
-                {% if sealer_details.dewpoint_spread %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}<br>
-                Rain last 24h: {% if sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
+                {% if sealer_details.current_temp is not none %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
+                {% if sealer_details.current_humidity is not none %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
+                {% if sealer_details.dewpoint_spread is not none %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}<br>
+                Rain last 24h: {% if sealer_details.total_precip_24h is none %}Unknown (missing data){% elif sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
                 · Max rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int if sealer_details.max_precip_prob is not none else '—' }}%
             </div>
             <div class="dp-threshold" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
@@ -340,7 +342,7 @@
             {% set pp = h.precip_prob_pct or 0 %}
             <div class="dp-factor">
                 <div>
-                    <span class="dp-dot dp-dot-{{ h.pour_score or 'yellow' }}"></span>
+                    <span class="dp-dot dp-dot-{{ h.pour_score or 'gray' }}"></span>
                     <span class="dp-factor-name">{{ "%02d"|format(h.hour) }}:00</span>
                     <span class="dp-factor-detail" style="margin-left:6px;">
                         {{ h.temp_f|round(0)|int if h.temp_f else '—' }}° · {{ pp|round(0)|int }}% rain · {{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph · {{ h.humidity_pct|round(0)|int if h.humidity_pct else '—' }}% humid
@@ -385,7 +387,7 @@
             <div class="h-col {% if loop.first %}h-now{% endif %}">
                 <div class="h-time">{% if loop.first %}Now{% else %}{{ "%02d"|format(h.hour) }}{% endif %}</div>
                 <div class="h-icon">{% set pp = h.precip_prob_pct or 0 %}{% if pp >= 40 %}🌧{% elif pp >= 15 %}🌦{% elif (h.cloud_cover_pct or 0) >= 70 %}☁️{% elif (h.cloud_cover_pct or 0) >= 30 %}⛅{% else %}☀️{% endif %}</div>
-                <div class="h-temp">{{ h.temp_f|round(0)|int }}°</div>
+                <div class="h-temp">{{ h.temp_f|round(0)|int if h.temp_f is not none else '—' }}°</div>
                 {% if pp >= 10 %}<div class="h-rain">{{ pp|round(0)|int }}%</div>{% else %}<div class="h-rain"></div>{% endif %}
             </div>
             {% endfor %}
@@ -454,7 +456,7 @@
             {% if day.best_window %}
             <span style="font-size:0.65rem; color:#0a84ff; margin-right:10px;">{{ day.best_window }}</span>
             {% endif %}
-            <span class="vb vb-{{ day.score }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper }}</span>
+            <span class="vb vb-{{ day.score or 'gray' }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper if day.score else 'NO DATA' }}</span>
         </div>
         {% endfor %}
     </div>

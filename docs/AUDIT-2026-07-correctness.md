@@ -10,6 +10,11 @@ API-shape findings (C2) are based on Open-Meteo's documented contract.
 
 Verdict: **RED** — see bottom.
 
+> **Status update (2026-07-16):** Critical items C1–C4 are fixed on this branch
+> (plus, from the High list, the template null-temp crash H2 and shorter cache
+> TTLs from H3, which the C2 fix depended on). H1 (alerts UI), H4 (missing
+> cache script), H5 (retries/fallback) and the Medium/Low items remain open.
+
 ---
 
 ## CRITICAL — wrong greens on real money paths

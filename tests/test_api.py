@@ -46,7 +46,8 @@ class TestForecastEndpoint:
         data = resp.json()
         assert len(data["days"]) > 0
         first_day = data["days"][0]
-        assert first_day["score"] in ["green", "yellow", "red"]
+        # None = no scorable working hours (e.g. evening fragment) — shown as "no data"
+        assert first_day["score"] in ["green", "yellow", "red", None]
         assert len(first_day["hours"]) > 0
         assert "pour_score" in first_day["hours"][0]
 
@@ -56,8 +57,8 @@ class TestSealerCheckEndpoint:
         resp = client.get("/api/v1/sealer-check/worcester")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["score"] in ["green", "yellow", "red"]
-        assert data["verdict"] in ["SAFE TO SEAL", "USE CAUTION", "DO NOT SEAL"]
+        assert data["score"] in ["green", "yellow", "red", None]
+        assert data["verdict"] in ["SAFE TO SEAL", "USE CAUTION", "DO NOT SEAL", "NO DATA — DO NOT SEAL"]
 
     def test_has_factors_and_details(self):
         resp = client.get("/api/v1/sealer-check/worcester")
@@ -77,7 +78,7 @@ class TestCureCheckEndpoint:
         resp = client.get("/api/v1/cure-check/worcester")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["score"] in ["green", "yellow", "red"]
+        assert data["score"] in ["green", "yellow", "red", None]
         assert "factors" in data
         assert "issues" in data
 
