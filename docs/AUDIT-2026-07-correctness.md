@@ -10,10 +10,18 @@ API-shape findings (C2) are based on Open-Meteo's documented contract.
 
 Verdict: **RED** — see bottom.
 
-> **Status update (2026-07-16):** Critical items C1–C4 are fixed on this branch
-> (plus, from the High list, the template null-temp crash H2 and shorter cache
-> TTLs from H3, which the C2 fix depended on). H1 (alerts UI), H4 (missing
-> cache script), H5 (retries/fallback) and the Medium/Low items remain open.
+> **Status update (2026-07-16):** All Critical (C1–C4) and High (H1–H5) items
+> are fixed on this branch. H1: NWS alerts now render as a dashboard banner
+> (fetched server-side per station, 5-min cache) with a broadened filter that
+> catches Tornado/Heat warnings, plus a /api/v1/alerts/{town} endpoint; when
+> the feed is unreachable the dashboard says so instead of implying all-clear.
+> H2: template null-guards. H3: shorter TTLs + a "data as of HH:MM" freshness
+> line that turns into a STALE warning on fallback data. H4:
+> scripts/cache_forecasts.py now exists (48h scored snapshots into
+> weather_forecasts, exit 1 only on total failure). H5: all upstream fetches
+> retry with backoff, then fall back to last-known-good data explicitly marked
+> stale, then return an honest 503 "treat as NO-GO". Medium/Low items remain
+> open.
 
 ---
 

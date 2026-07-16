@@ -25,7 +25,10 @@ import psycopg2.pool
 import psycopg2.extras
 
 from config import DB_CONFIG, STATIONS
-from weather_client import fetch_forecast_48h, fetch_last_24h, parse_forecast_hours, parse_history_hours
+from weather_client import (
+    fetch_forecast_48h, fetch_last_24h, fetch_nws_alerts,
+    parse_forecast_hours, parse_history_hours, parse_alerts,
+)
 from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window, summarize_day
 
 ET = ZoneInfo("America/New_York")
@@ -70,23 +73,35 @@ def get_db():
 # quickly, so it gets a shorter TTL than the forward-looking forecast.
 FORECAST_CACHE_TTL = timedelta(hours=1)
 HISTORY_CACHE_TTL = timedelta(minutes=30)
+ALERTS_CACHE_TTL = timedelta(minutes=5)
 _forecast_cache = {}
 
 
 def _cache_ttl(cache_type: str) -> timedelta:
-    return HISTORY_CACHE_TTL if cache_type.startswith("history") else FORECAST_CACHE_TTL
+    if cache_type.startswith("history"):
+        return HISTORY_CACHE_TTL
+    if cache_type == "alerts":
+        return ALERTS_CACHE_TTL
+    return FORECAST_CACHE_TTL
 
 
 def _get_cached_forecast(station_id: str, cache_type: str):
+    # Expired entries are kept (not deleted) as last-known-good data for
+    # graceful degradation when the upstream source is down.
     key = f"{station_id}:{cache_type}"
     if key in _forecast_cache:
         data, fetched_at = _forecast_cache[key]
         if datetime.now(ET) - fetched_at < _cache_ttl(cache_type):
             logger.debug("Cache hit: %s", key)
             return data
-        del _forecast_cache[key]
     logger.debug("Cache miss: %s", key)
     return None
+
+
+def _get_stale_forecast(station_id: str, cache_type: str):
+    """Last-known-good data of any age → (data, fetched_at) or (None, None)."""
+    entry = _forecast_cache.get(f"{station_id}:{cache_type}")
+    return entry if entry else (None, None)
 
 
 def _set_cached_forecast(station_id: str, cache_type: str, data):
@@ -177,6 +192,78 @@ def _sealer_inputs(history_hours, forecast_hours):
     return recent_hours, next_24h, total_precip_24h, max_precip_prob, current
 
 
+# --- Data fetch with graceful degradation ---
+# Order: fresh cache → live fetch (with retries) → stale last-known-good.
+# Stale data is served honestly (stale=True, fetched_at) and still passes
+# through the timestamp filters, so hours it can no longer cover simply
+# disappear and the fail-safe "no data" paths take over.
+
+async def _get_forecast_hours(station):
+    """Returns (hours, fetched_at, stale). Raises 503 when nothing is available."""
+    sid = station["station_id"]
+    cached = _get_cached_forecast(sid, "forecast48")
+    if cached is not None:
+        _, fetched_at = _forecast_cache[f"{sid}:forecast48"]
+        return cached, fetched_at, False
+    try:
+        data = await fetch_forecast_48h(station["lat"], station["lon"])
+        hours = parse_forecast_hours(data)
+        _set_cached_forecast(sid, "forecast48", hours)
+        return hours, datetime.now(ET), False
+    except Exception as e:
+        logger.error("Forecast fetch failed for %s: %s", sid, e)
+        stale, fetched_at = _get_stale_forecast(sid, "forecast48")
+        if stale is not None:
+            logger.warning("Serving stale forecast for %s (fetched %s)", sid, fetched_at)
+            return stale, fetched_at, True
+        raise HTTPException(
+            status_code=503,
+            detail="Forecast data unavailable — treat as NO-GO. Do not pour or seal on a guess.",
+        )
+
+
+async def _get_history_hours(station):
+    """Returns (hours, fetched_at, stale). Raises 503 when nothing is available."""
+    sid = station["station_id"]
+    cached = _get_cached_forecast(sid, "history24")
+    if cached is not None:
+        _, fetched_at = _forecast_cache[f"{sid}:history24"]
+        return cached, fetched_at, False
+    try:
+        data = await fetch_last_24h(station["lat"], station["lon"])
+        hours = parse_history_hours(data)
+        _set_cached_forecast(sid, "history24", hours)
+        return hours, datetime.now(ET), False
+    except Exception as e:
+        logger.error("History fetch failed for %s: %s", sid, e)
+        stale, fetched_at = _get_stale_forecast(sid, "history24")
+        if stale is not None:
+            logger.warning("Serving stale history for %s (fetched %s)", sid, fetched_at)
+            return stale, fetched_at, True
+        raise HTTPException(
+            status_code=503,
+            detail="Recent-weather data unavailable — treat as NO-GO. Do not seal on a guess.",
+        )
+
+
+async def _get_alerts(station):
+    """Active NWS alerts for the station. Returns a list, or None when the
+    alert feed is unreachable — 'unknown' must stay distinct from 'none active'."""
+    sid = station["station_id"]
+    cached = _get_cached_forecast(sid, "alerts")
+    if cached is not None:
+        return cached
+    try:
+        features = await fetch_nws_alerts(station["lat"], station["lon"])
+        alerts = parse_alerts(features)
+        _set_cached_forecast(sid, "alerts", alerts)
+        return alerts
+    except Exception as e:
+        logger.error("NWS alert fetch failed for %s: %s", sid, e)
+        stale, _ = _get_stale_forecast(sid, "alerts")
+        return stale  # last-known alerts, or None if never fetched
+
+
 # --- Helpers ---
 def _serialize_row(row):
     return {k: (float(v) if isinstance(v, decimal.Decimal) else str(v) if hasattr(v, 'isoformat') else v) for k, v in row.items()}
@@ -214,14 +301,7 @@ async def get_forecast(town: str):
 
     station = STATIONS[town]
 
-    cached = _get_cached_forecast(station["station_id"], "forecast48")
-    if cached:
-        hours = cached
-    else:
-        data = await fetch_forecast_48h(station["lat"], station["lon"])
-        hours = parse_forecast_hours(data)
-        _set_cached_forecast(station["station_id"], "forecast48", hours)
-
+    hours, fetched_at, stale = await _get_forecast_hours(station)
     hours = _upcoming_hours(hours)
 
     scored_hours = []
@@ -275,6 +355,9 @@ async def get_forecast(town: str):
         "town": station["name"],
         "covers": station["covers"],
         "best_window": best_window,
+        "stale": stale,
+        "data_fetched_at": fetched_at.isoformat(),
+        "alerts": await _get_alerts(station),
         "days": day_summaries,
     }
 
@@ -287,23 +370,8 @@ async def sealer_check(town: str):
 
     station = STATIONS[town]
 
-    # Last 24h — use cache
-    cached_hist = _get_cached_forecast(station["station_id"], "history24")
-    if cached_hist:
-        history_hours = cached_hist
-    else:
-        history_data = await fetch_last_24h(station["lat"], station["lon"])
-        history_hours = parse_history_hours(history_data)
-        _set_cached_forecast(station["station_id"], "history24", history_hours)
-
-    # Forecast — use cache
-    cached_fc = _get_cached_forecast(station["station_id"], "forecast48")
-    if cached_fc:
-        forecast_hours = cached_fc
-    else:
-        forecast_data = await fetch_forecast_48h(station["lat"], station["lon"])
-        forecast_hours = parse_forecast_hours(forecast_data)
-        _set_cached_forecast(station["station_id"], "forecast48", forecast_hours)
+    history_hours, hist_fetched_at, hist_stale = await _get_history_hours(station)
+    forecast_hours, fc_fetched_at, fc_stale = await _get_forecast_hours(station)
 
     recent_hours, next_24h, total_precip_24h, max_precip_prob, current = _sealer_inputs(
         history_hours, forecast_hours
@@ -363,6 +431,9 @@ async def sealer_check(town: str):
             "max_humidity_pct": max_humidity,
         },
         "next_24h_max_precip_prob": max_precip_prob,
+        "stale": hist_stale or fc_stale,
+        "data_fetched_at": min(hist_fetched_at, fc_fetched_at).isoformat(),
+        "alerts": await _get_alerts(station),
         "hours": recent_hours,
     }
 
@@ -422,14 +493,7 @@ async def cure_check(town: str):
 
     station = STATIONS[town]
 
-    cached = _get_cached_forecast(station["station_id"], "forecast48")
-    if cached:
-        forecast_hours = cached
-    else:
-        data = await fetch_forecast_48h(station["lat"], station["lon"])
-        forecast_hours = parse_forecast_hours(data)
-        _set_cached_forecast(station["station_id"], "forecast48", forecast_hours)
-
+    forecast_hours, fetched_at, stale = await _get_forecast_hours(station)
     forecast_hours = _upcoming_hours(forecast_hours)
 
     overall, factors, issues = score_cure_window(forecast_hours)
@@ -446,12 +510,30 @@ async def cure_check(town: str):
                     else "NO DATA — DO NOT POUR"),
         "factors": factors,
         "issues": issues,
+        "stale": stale,
+        "data_fetched_at": fetched_at.isoformat(),
+        "alerts": await _get_alerts(station),
         "window": {
             "hours": len(forecast_hours),
             "temp_low_f": min(temps) if temps else None,
             "temp_high_f": max(temps) if temps else None,
         },
     }
+
+
+@app.get("/api/v1/alerts/{town}")
+async def get_town_alerts(town: str):
+    """Active NWS severe-weather alerts for a town's location."""
+    if town not in STATIONS:
+        raise HTTPException(status_code=404, detail=f"Unknown town: {town}. Available: {list(STATIONS.keys())}")
+
+    station = STATIONS[town]
+    alerts = await _get_alerts(station)
+
+    if alerts is None:
+        return {"town": station["name"], "status": "unavailable",
+                "detail": "NWS alert feed unreachable — severe-weather status unknown", "alerts": []}
+    return {"town": station["name"], "status": "ok", "count": len(alerts), "alerts": alerts}
 
 
 # ============================================================
@@ -600,26 +682,16 @@ async def dashboard(request: Request, town: str = "worcester"):
     station = STATIONS[town]
 
     try:
-        cached = _get_cached_forecast(station["station_id"], "forecast48")
-        if cached:
-            forecast_hours = cached
-        else:
-            forecast_data = await fetch_forecast_48h(station["lat"], station["lon"])
-            forecast_hours = parse_forecast_hours(forecast_data)
-            _set_cached_forecast(station["station_id"], "forecast48", forecast_hours)
-    except Exception:
-        forecast_hours = []
+        forecast_hours, fc_fetched_at, fc_stale = await _get_forecast_hours(station)
+    except HTTPException:
+        forecast_hours, fc_fetched_at, fc_stale = [], None, False
 
     try:
-        cached_hist = _get_cached_forecast(station["station_id"], "history24")
-        if cached_hist:
-            history_hours = cached_hist
-        else:
-            history_data = await fetch_last_24h(station["lat"], station["lon"])
-            history_hours = parse_history_hours(history_data)
-            _set_cached_forecast(station["station_id"], "history24", history_hours)
-    except Exception:
-        history_hours = []
+        history_hours, hist_fetched_at, hist_stale = await _get_history_hours(station)
+    except HTTPException:
+        history_hours, hist_fetched_at, hist_stale = [], None, False
+
+    alerts = await _get_alerts(station)
 
     forecast_hours = _upcoming_hours(forecast_hours)
 
@@ -668,11 +740,20 @@ async def dashboard(request: Request, town: str = "worcester"):
             "hours": day_hours,
         })
 
+    data_as_of = None
+    data_stale = fc_stale or hist_stale
+    fetch_times = [t for t in (fc_fetched_at, hist_fetched_at) if t is not None]
+    if fetch_times:
+        data_as_of = min(fetch_times).strftime("%-I:%M %p")
+
     context = {
         "request": request,
         "town": town,
         "station": station,
         "stations": STATIONS,
+        "alerts": alerts,
+        "data_as_of": data_as_of,
+        "data_stale": data_stale,
         "sealer_score": sealer_score,
         "sealer_factors": sealer_factors,
         "sealer_details": {

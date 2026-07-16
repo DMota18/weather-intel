@@ -261,10 +261,63 @@
             letter-spacing: 0.5px;
         }
 
+        /* ---- NWS alert banner ---- */
+        .alert-banner {
+            margin: 10px 16px 0;
+        }
+        .alert-item {
+            background: rgba(255,159,10,0.15);
+            border: 1px solid rgba(255,159,10,0.4);
+            color: #ff9f0a;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        .alert-item.alert-severe {
+            background: rgba(255,69,58,0.15);
+            border-color: rgba(255,69,58,0.5);
+            color: #ff453a;
+        }
+        .alert-item .alert-meta { font-size: 0.65rem; opacity: 0.75; margin-top: 2px; }
+        .alert-unavailable {
+            margin: 10px 16px 0;
+            text-align: center;
+            font-size: 0.65rem;
+            color: rgba(255,255,255,0.35);
+        }
+
+        /* ---- Data freshness ---- */
+        .data-asof {
+            text-align: center;
+            font-size: 0.6rem;
+            color: rgba(255,255,255,0.3);
+            padding-bottom: 4px;
+        }
+        .data-asof.data-stale { color: #ff9f0a; font-weight: 600; }
+
         .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 20px 16px 40px; }
     </style>
 </head>
 <body>
+    <!-- NWS SEVERE-WEATHER ALERTS (shown even when forecast data is down) -->
+    {% if alerts %}
+    <div class="alert-banner">
+        {% for a in alerts[:3] %}
+        <div class="alert-item {% if a.severity in ('Extreme', 'Severe') %}alert-severe{% endif %}">
+            ⚠️ <strong>{{ a.event }}</strong>
+            {% if a.headline %}<div class="alert-meta">{{ a.headline }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% if alerts|length > 3 %}
+        <div class="alert-unavailable">+ {{ alerts|length - 3 }} more active alert(s)</div>
+        {% endif %}
+    </div>
+    {% elif alerts is none %}
+    <div class="alert-unavailable">⚠ Severe-weather alert feed unavailable — check weather.gov before working</div>
+    {% endif %}
+
     {% if forecast_hours %}
     {% set now = forecast_hours[0] %}
     {% set today = days[0] if days else none %}
@@ -286,6 +339,11 @@
         </div>
         {% if today and today.temp_high is not none and today.temp_low is not none %}
         <div class="current-hilo">H:{{ today.temp_high|round(0)|int }}°  L:{{ today.temp_low|round(0)|int }}°</div>
+        {% endif %}
+        {% if data_as_of %}
+        <div class="data-asof {% if data_stale %}data-stale{% endif %}">
+            {% if data_stale %}⚠ STALE — source down, data from {{ data_as_of }}{% else %}Data as of {{ data_as_of }}{% endif %}
+        </div>
         {% endif %}
     </div>
 
