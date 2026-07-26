@@ -8,7 +8,19 @@ from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 import asyncio
 import threading
+
 import redis
+import psycopg2
+import psycopg2.pool
+import psycopg2.extras
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from config import DB_CONFIG, STATIONS
+from weather_client import fetch_forecast_48h, fetch_last_24h, parse_forecast_hours, parse_history_hours
+from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,16 +28,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger("weather-intel")
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-import psycopg2
-import psycopg2.pool
-import psycopg2.extras
-
-from config import DB_CONFIG, STATIONS
-from weather_client import fetch_forecast_48h, fetch_last_24h, parse_forecast_hours, parse_history_hours
-from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window
 
 ET = ZoneInfo("America/New_York")
 
@@ -500,8 +502,6 @@ async def about_page(request: Request):
     return templates.TemplateResponse(request, "about.html", {"request": request})
 
 
-from fastapi.staticfiles import StaticFiles
-
 dbt_docs_path = os.path.join(os.path.dirname(__file__), "..", "dbt_project", "target")
 if os.path.isdir(dbt_docs_path):
     app.mount("/dbt-docs", StaticFiles(directory=dbt_docs_path, html=True), name="dbt-docs")
@@ -645,7 +645,10 @@ async def _broadcast(data: str):
 
 @app.on_event("startup")
 async def start_redis_listener():
-    await redis_listener()
+    try:
+        await redis_listener()
+    except Exception as e:
+        logger.warning("Redis unavailable — live updates disabled, API/dashboard still serving: %s", e)
 
 
 @app.websocket("/ws/live")
@@ -676,7 +679,9 @@ async def stream_status():
         last_entries = r.xrevrange("weather:updates", count=1)
         last_update = last_entries[0][1] if last_entries else None
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        # Redis may be unreachable (e.g. not running); the client count is local
+        # in-process state and is always reportable regardless of the stream backend.
+        return {"status": "degraded", "connected_clients": len(connected_clients), "detail": str(e)}
 
     return {
         "status": "ok",

@@ -157,6 +157,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/weather-intel
+            export PREV_SHA=$(git rev-parse HEAD)
             git pull origin main
             ~/weather-intel/deploy.sh
 
