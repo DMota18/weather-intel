@@ -679,7 +679,9 @@ async def stream_status():
         last_entries = r.xrevrange("weather:updates", count=1)
         last_update = last_entries[0][1] if last_entries else None
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        # Redis may be unreachable (e.g. not running); the client count is local
+        # in-process state and is always reportable regardless of the stream backend.
+        return {"status": "degraded", "connected_clients": len(connected_clients), "detail": str(e)}
 
     return {
         "status": "ok",
