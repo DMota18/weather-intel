@@ -29,9 +29,9 @@ logging.basicConfig(
 logger = logging.getLogger("cache_forecasts")
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app"))
-from config import DB_CONFIG, STATIONS
-from weather_client import fetch_forecast_48h, parse_forecast_hours
-from scoring import score_pour_hour
+from config import DB_CONFIG, STATIONS  # noqa: E402
+from weather_client import fetch_forecast_48h, parse_forecast_hours  # noqa: E402
+from scoring import score_pour_hour  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 

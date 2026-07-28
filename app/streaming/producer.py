@@ -23,9 +23,9 @@ logging.basicConfig(
 logger = logging.getLogger("producer")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import STATIONS
-from scoring import score_pour_hour
-from weather_client import alert_is_relevant
+from config import STATIONS  # noqa: E402
+from scoring import score_pour_hour  # noqa: E402
+from weather_client import alert_is_relevant  # noqa: E402
 
 REDIS = redis.Redis(host="localhost", port=6379, decode_responses=True)
 STREAM_WEATHER = "weather:updates"

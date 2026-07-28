@@ -261,8 +261,10 @@
             letter-spacing: 0.5px;
         }
 
-        /* ---- NWS alert banner ---- */
-        .alert-banner {
+        /* ---- NWS alerts, server-rendered at page load ----
+           Distinct from .alert-banner below, which is the live WebSocket
+           banner and is display:none until a push arrives. */
+        .nws-alerts {
             margin: 10px 16px 0;
         }
         .alert-item {
@@ -298,14 +300,81 @@
         .data-asof.data-stale { color: #ff9f0a; font-weight: 600; }
 
         .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 20px 16px 40px; }
+
+        /* ---- Live updates (WebSocket) ---- */
+        .live-pill {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.5rem;
+            font-weight: 600;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.04);
+            padding: 4px 8px;
+            border-radius: 10px;
+            z-index: 20;
+        }
+        .live-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.25); }
+        .live-dot-on { background: #34c759; box-shadow: 0 0 6px #34c759; animation: livepulse 2s infinite; }
+        .live-dot-off { background: rgba(255,255,255,0.25); }
+        @keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .alert-banner {
+            display: none;
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            background: rgba(255,69,58,0.15);
+            color: #ff453a;
+            border-bottom: 1px solid rgba(255,69,58,0.3);
+            padding: 10px 14px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-align: center;
+            line-height: 1.4;
+        }
+        .alert-banner.show { display: block; }
+
+        .toast {
+            position: fixed;
+            bottom: -80px;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 90%;
+            background: rgba(30,30,30,0.96);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            z-index: 40;
+            transition: bottom 0.35s ease;
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+        }
+        .toast.show { bottom: 24px; }
+
+        @keyframes tempflash { 0% { color: #34c759; } 100% { color: #fff; } }
+        .current-temp.flash { animation: tempflash 1s ease; }
     </style>
 </head>
 <body>
-    <!-- NWS SEVERE-WEATHER ALERTS (shown even when forecast data is down) -->
+    <!-- Live WebSocket banner (pushed alerts) + connection indicator -->
+    <div class="alert-banner" id="alert-banner"></div>
+    <div class="live-pill"><span class="live-dot live-dot-off" id="live-dot"></span><span id="live-label">off</span></div>
+
+    <!-- NWS SEVERE-WEATHER ALERTS, server-rendered so they show on page load
+         even when the forecast source or the streaming stack is down -->
     {% if alerts %}
-    <div class="alert-banner">
+    <div class="nws-alerts" id="nws-alerts">
         {% for a in alerts[:3] %}
-        <div class="alert-item {% if a.severity in ('Extreme', 'Severe') %}alert-severe{% endif %}">
+        <div class="alert-item {% if a.severity in ('Extreme', 'Severe') %}alert-severe{% endif %}" data-event="{{ a.event }}">
             ⚠️ <strong>{{ a.event }}</strong>
             {% if a.headline %}<div class="alert-meta">{{ a.headline }}</div>{% endif %}
         </div>
@@ -329,7 +398,7 @@
             <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
             {% endfor %}
         </select>
-        <div class="current-temp">{{ now.temp_f|round(0)|int if now.temp_f is not none else '—' }}°</div>
+        <div class="current-temp" id="current-temp">{{ now.temp_f|round(0)|int if now.temp_f is not none else '—' }}°</div>
         <div class="current-desc">
             {% if (now.precip_prob_pct or 0) >= 40 %}Rain Likely
             {% elif (now.precip_prob_pct or 0) >= 15 %}Chance of Rain
@@ -531,6 +600,8 @@
 
     <div class="footer"><a href="/about" style="color:rgba(255,255,255,0.3); text-decoration:none;">About this project</a> · Open-Meteo · NOAA GHCN</div>
 
+    <div class="toast" id="toast"></div>
+
     <script>
     function togglePanel(id) {
         var panel = document.getElementById(id);
@@ -540,6 +611,82 @@
         });
         panel.classList.toggle('open');
     }
+
+    // ---- Live weather updates over WebSocket (/ws/live) ----
+    (function () {
+        var CURRENT_TOWN = {{ town|tojson }};
+        var tempEl = document.getElementById('current-temp');
+        var dotEl = document.getElementById('live-dot');
+        var labelEl = document.getElementById('live-label');
+        var bannerEl = document.getElementById('alert-banner');
+        var toastEl = document.getElementById('toast');
+        var ws, toastTimer, reconnectDelay = 1000;
+
+        function setStatus(on) {
+            dotEl.className = 'live-dot ' + (on ? 'live-dot-on' : 'live-dot-off');
+            labelEl.textContent = on ? 'live' : 'off';
+        }
+
+        function scoreColor(s) {
+            return s === 'green' ? '#34c759' : s === 'yellow' ? '#ffcc00' : s === 'red' ? '#ff453a' : 'rgba(255,255,255,0.3)';
+        }
+
+        function showToast(msg, color) {
+            toastEl.textContent = msg;
+            toastEl.style.borderColor = color || 'rgba(255,255,255,0.2)';
+            toastEl.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 5000);
+        }
+
+        function onWeatherUpdate(m) {
+            if (m.station !== CURRENT_TOWN) return;  // only reflect the town being viewed
+            var t = parseFloat(m.temp_f);
+            if (!isNaN(t) && tempEl) {
+                tempEl.textContent = Math.round(t) + '°';
+                tempEl.classList.remove('flash');
+                void tempEl.offsetWidth;  // restart the flash animation
+                tempEl.classList.add('flash');
+            }
+            if (m.score_changed && m.pour_score) {
+                showToast('Pour conditions now ' + m.pour_score.toUpperCase(), scoreColor(m.pour_score));
+            }
+        }
+
+        function onAlert(m) {
+            // Skip if this event is already in the server-rendered list above,
+            // so an alert active at page load isn't shown twice
+            var rendered = document.querySelectorAll('#nws-alerts [data-event]');
+            for (var i = 0; i < rendered.length; i++) {
+                if (rendered[i].getAttribute('data-event') === m.event) return;
+            }
+            var txt = '⚠ ' + (m.event || 'Weather Alert');
+            if (m.headline) txt += ' — ' + m.headline;
+            bannerEl.textContent = txt;
+            bannerEl.classList.add('show');
+        }
+
+        function connect() {
+            var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(proto + '//' + location.host + '/ws/live');
+            ws.onopen = function () { setStatus(true); reconnectDelay = 1000; };
+            ws.onmessage = function (ev) {
+                var m;
+                try { m = JSON.parse(ev.data); } catch (e) { return; }
+                if (m.type === 'weather_update') onWeatherUpdate(m);
+                else if (m.type === 'nws_alert') onAlert(m);
+            };
+            ws.onclose = function () {
+                setStatus(false);
+                setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 2, 30000);  // exponential backoff, cap 30s
+            };
+            ws.onerror = function () { try { ws.close(); } catch (e) {} };
+        }
+
+        setStatus(false);
+        connect();
+    })();
     </script>
 </body>
 </html>
