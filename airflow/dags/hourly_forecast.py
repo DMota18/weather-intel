@@ -1,8 +1,9 @@
 """
-Hourly Forecast DAG: Fetch Open-Meteo forecasts → Cache to Postgres
+Hourly Forecast DAG: Fetch Open-Meteo forecasts → Snapshot to Postgres
 
-Runs every hour. Pre-warms the forecast cache so dashboard loads are instant.
-Stores forecasts in the weather_forecasts table for historical tracking.
+Runs every hour. Stores scored forecast snapshots in the weather_forecasts
+table for historical tracking, accuracy analysis, and model training.
+(The API serves live requests from its own in-process cache, not this table.)
 """
 
 import sys
@@ -27,7 +28,7 @@ default_args = {
 with DAG(
     "hourly_forecast_cache",
     default_args=default_args,
-    description="Hourly: fetch forecasts from Open-Meteo, cache to Postgres",
+    description="Hourly: fetch forecasts from Open-Meteo, snapshot to Postgres",
     schedule_interval="0 * * * *",
     start_date=datetime(2026, 6, 10),
     catchup=False,

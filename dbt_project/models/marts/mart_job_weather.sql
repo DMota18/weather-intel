@@ -16,6 +16,7 @@ select
     round(avg(dw.temp_min_f)::numeric, 1) as avg_low,
     round(sum(coalesce(dw.precip_in, 0))::numeric, 2) as total_precip_in,
     count(*) filter (where coalesce(dw.precip_in, 0) > 0) as rainy_days,
+    count(*) filter (where dw.precip_in is null) as missing_precip_days,
     count(*) filter (where dw.pour_score = 'green') as green_days,
     count(*) filter (where dw.pour_score = 'yellow') as yellow_days,
     count(*) filter (where dw.pour_score = 'red') as red_days,

@@ -25,6 +25,7 @@ logger = logging.getLogger("producer")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import STATIONS  # noqa: E402
 from scoring import score_pour_hour  # noqa: E402
+from weather_client import alert_is_relevant  # noqa: E402
 
 REDIS = redis.Redis(host="localhost", port=6379, decode_responses=True)
 STREAM_WEATHER = "weather:updates"
@@ -119,12 +120,9 @@ def publish_alert(alert_feature):
     if REDIS.exists(seen_key):
         return False
 
-    concrete_keywords = ["freeze", "frost", "wind", "thunder", "hail", "flood", "ice"]
-    headline = (props.get("headline") or "").lower()
-    event = (props.get("event") or "").lower()
-    is_relevant = any(kw in headline or kw in event for kw in concrete_keywords)
-
-    if not is_relevant:
+    # Shared filter: Severe/Extreme always pass, plus concrete-relevant
+    # keywords (incl. tornado/heat — the old inline list missed both).
+    if not alert_is_relevant(props):
         return False
 
     message = {

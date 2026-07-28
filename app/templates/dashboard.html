@@ -65,6 +65,7 @@
         .vb-yellow { background: rgba(255,204,0,0.2); color: #ffcc00; }
         .vb-red { background: rgba(255,69,58,0.2); color: #ff453a; }
         .vb-blue { background: rgba(10,132,255,0.2); color: #0a84ff; }
+        .vb-gray { background: rgba(142,142,147,0.18); color: #98989d; }
         .vb-clickable { cursor: pointer; }
 
         /* ---- Detail panel (slide-down on click) ---- */
@@ -103,6 +104,7 @@
         .dp-dot-green { background: #34c759; }
         .dp-dot-yellow { background: #ffcc00; }
         .dp-dot-red { background: #ff453a; }
+        .dp-dot-gray { background: #98989d; }
         .dp-threshold {
             font-size: 0.6rem;
             color: rgba(255,255,255,0.25);
@@ -259,6 +261,44 @@
             letter-spacing: 0.5px;
         }
 
+        /* ---- NWS alerts, server-rendered at page load ----
+           Distinct from .alert-banner below, which is the live WebSocket
+           banner and is display:none until a push arrives. */
+        .nws-alerts {
+            margin: 10px 16px 0;
+        }
+        .alert-item {
+            background: rgba(255,159,10,0.15);
+            border: 1px solid rgba(255,159,10,0.4);
+            color: #ff9f0a;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        .alert-item.alert-severe {
+            background: rgba(255,69,58,0.15);
+            border-color: rgba(255,69,58,0.5);
+            color: #ff453a;
+        }
+        .alert-item .alert-meta { font-size: 0.65rem; opacity: 0.75; margin-top: 2px; }
+        .alert-unavailable {
+            margin: 10px 16px 0;
+            text-align: center;
+            font-size: 0.65rem;
+            color: rgba(255,255,255,0.35);
+        }
+
+        /* ---- Data freshness ---- */
+        .data-asof {
+            text-align: center;
+            font-size: 0.6rem;
+            color: rgba(255,255,255,0.3);
+            padding-bottom: 4px;
+        }
+        .data-asof.data-stale { color: #ff9f0a; font-weight: 600; }
+
         .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 20px 16px 40px; }
 
         /* ---- Live updates (WebSocket) ---- */
@@ -325,8 +365,27 @@
     </style>
 </head>
 <body>
+    <!-- Live WebSocket banner (pushed alerts) + connection indicator -->
     <div class="alert-banner" id="alert-banner"></div>
     <div class="live-pill"><span class="live-dot live-dot-off" id="live-dot"></span><span id="live-label">off</span></div>
+
+    <!-- NWS SEVERE-WEATHER ALERTS, server-rendered so they show on page load
+         even when the forecast source or the streaming stack is down -->
+    {% if alerts %}
+    <div class="nws-alerts" id="nws-alerts">
+        {% for a in alerts[:3] %}
+        <div class="alert-item {% if a.severity in ('Extreme', 'Severe') %}alert-severe{% endif %}" data-event="{{ a.event }}">
+            ⚠️ <strong>{{ a.event }}</strong>
+            {% if a.headline %}<div class="alert-meta">{{ a.headline }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        {% if alerts|length > 3 %}
+        <div class="alert-unavailable">+ {{ alerts|length - 3 }} more active alert(s)</div>
+        {% endif %}
+    </div>
+    {% elif alerts is none %}
+    <div class="alert-unavailable">⚠ Severe-weather alert feed unavailable — check weather.gov before working</div>
+    {% endif %}
 
     {% if forecast_hours %}
     {% set now = forecast_hours[0] %}
@@ -339,7 +398,7 @@
             <option value="{{ slug }}" {% if slug == town %}selected{% endif %}>{{ s.name }} — {{ s.covers }}</option>
             {% endfor %}
         </select>
-        <div class="current-temp" id="current-temp">{{ now.temp_f|round(0)|int if now.temp_f else '—' }}°</div>
+        <div class="current-temp" id="current-temp">{{ now.temp_f|round(0)|int if now.temp_f is not none else '—' }}°</div>
         <div class="current-desc">
             {% if (now.precip_prob_pct or 0) >= 40 %}Rain Likely
             {% elif (now.precip_prob_pct or 0) >= 15 %}Chance of Rain
@@ -347,15 +406,20 @@
             {% elif (now.cloud_cover_pct or 0) >= 30 %}Partly Cloudy
             {% else %}Clear{% endif %}
         </div>
-        {% if today %}
+        {% if today and today.temp_high is not none and today.temp_low is not none %}
         <div class="current-hilo">H:{{ today.temp_high|round(0)|int }}°  L:{{ today.temp_low|round(0)|int }}°</div>
+        {% endif %}
+        {% if data_as_of %}
+        <div class="data-asof {% if data_stale %}data-stale{% endif %}">
+            {% if data_stale %}⚠ STALE — source down, data from {{ data_as_of }}{% else %}Data as of {{ data_as_of }}{% endif %}
+        </div>
         {% endif %}
     </div>
 
     <!-- VERDICTS (clickable) -->
     <div class="verdict-bar">
-        <span class="vb vb-{{ sealer_score or 'yellow' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
-        <span class="vb vb-{{ today.score if today else 'yellow' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% else %}No{% endif %} ▾</span>
+        <span class="vb vb-{{ sealer_score or 'gray' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% elif sealer_score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
+        <span class="vb vb-{{ (today.score or 'gray') if today else 'gray' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% elif today and today.score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
         {% if today and today.best_window %}
         <span class="vb vb-blue">{{ today.best_window }}</span>
         {% endif %}
@@ -376,18 +440,22 @@
             {% endfor %}
             <div class="dp-threshold">
                 <strong>Current readings:</strong><br>
-                {% if sealer_details.current_temp %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
-                {% if sealer_details.current_humidity %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
-                {% if sealer_details.dewpoint_spread %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}<br>
-                Rain last 24h: {% if sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
+                {% if sealer_details.current_temp is not none %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
+                {% if sealer_details.current_humidity is not none %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
+                {% if sealer_details.current_wind is not none %} · Wind: {{ sealer_details.current_wind|round(0)|int }}mph{% endif %}
+                {% if sealer_details.dewpoint_spread is not none %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}
+                {% if sealer_details.min_temp_next_12h is not none %} · Low next 12h: {{ sealer_details.min_temp_next_12h|round(0)|int }}°F{% endif %}<br>
+                Rain last 24h: {% if sealer_details.total_precip_24h is none %}Unknown (missing data){% elif sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
                 · Max rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int if sealer_details.max_precip_prob is not none else '—' }}%
             </div>
             <div class="dp-threshold" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
                 <strong>Thresholds:</strong><br>
                 Temp: 50–90°F green · 40–50°F caution · &lt;40°F no<br>
+                Low next 12h: ≥50°F green · 40–50°F caution · &lt;40°F no<br>
                 Rain last 24h: None green · &lt;0.1" caution · Any red<br>
                 Rain next 24h: &lt;10% green · 10–40% caution · &gt;40% red<br>
                 Humidity: &lt;70% green · 70–85% caution · &gt;85% red<br>
+                Wind: &lt;10mph green · 10–15mph caution · &gt;15mph red<br>
                 Dewpoint spread: &gt;10°F green · 5–10°F caution · &lt;5°F red
             </div>
             <div class="dp-threshold" style="margin-top:6px; color:rgba(255,255,255,0.2); font-size:0.55rem; font-style:italic;">
@@ -401,11 +469,11 @@
         <div class="detail-panel-inner">
             <div class="dp-title">Pour Assessment — Work Hours (7AM–5PM)</div>
             {% for h in forecast_hours %}
-            {% if h.hour >= 7 and h.hour <= 17 %}
+            {% if h.hour >= 7 and h.hour < 17 %}
             {% set pp = h.precip_prob_pct or 0 %}
             <div class="dp-factor">
                 <div>
-                    <span class="dp-dot dp-dot-{{ h.pour_score or 'yellow' }}"></span>
+                    <span class="dp-dot dp-dot-{{ h.pour_score or 'gray' }}"></span>
                     <span class="dp-factor-name">{{ "%02d"|format(h.hour) }}:00</span>
                     <span class="dp-factor-detail" style="margin-left:6px;">
                         {{ h.temp_f|round(0)|int if h.temp_f else '—' }}° · {{ pp|round(0)|int }}% rain · {{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph · {{ h.humidity_pct|round(0)|int if h.humidity_pct else '—' }}% humid
@@ -450,7 +518,7 @@
             <div class="h-col {% if loop.first %}h-now{% endif %}">
                 <div class="h-time">{% if loop.first %}Now{% else %}{{ "%02d"|format(h.hour) }}{% endif %}</div>
                 <div class="h-icon">{% set pp = h.precip_prob_pct or 0 %}{% if pp >= 40 %}🌧{% elif pp >= 15 %}🌦{% elif (h.cloud_cover_pct or 0) >= 70 %}☁️{% elif (h.cloud_cover_pct or 0) >= 30 %}⛅{% else %}☀️{% endif %}</div>
-                <div class="h-temp">{{ h.temp_f|round(0)|int }}°</div>
+                <div class="h-temp">{{ h.temp_f|round(0)|int if h.temp_f is not none else '—' }}°</div>
                 {% if pp >= 10 %}<div class="h-rain">{{ pp|round(0)|int }}%</div>{% else %}<div class="h-rain"></div>{% endif %}
             </div>
             {% endfor %}
@@ -489,7 +557,7 @@
         {% set t = h.temp_f or t_min %}
         {% set pct = ((t - t_min) / t_range * 70 + 15) %}
         {% set pp = h.precip_prob_pct or 0 %}
-        <div class="u-row" {% if h.hour < 7 or h.hour > 17 %}style="opacity:0.3"{% endif %}>
+        <div class="u-row" {% if h.hour < 7 or h.hour >= 17 %}style="opacity:0.3"{% endif %}>
             <div class="u-time">{{ "%02d"|format(h.hour) }}</div>
             <div class="u-temp-col" style="{% if t < 40 %}color:#64b5f6{% elif t < 50 %}color:#4dd0e1{% elif t <= 90 %}color:#fff{% elif t <= 95 %}color:#ffb74d{% else %}color:#ef5350{% endif %}">{{ t|round(0)|int }}°</div>
             <div class="u-bar-col">
@@ -519,7 +587,7 @@
             {% if day.best_window %}
             <span style="font-size:0.65rem; color:#0a84ff; margin-right:10px;">{{ day.best_window }}</span>
             {% endif %}
-            <span class="vb vb-{{ day.score }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper }}</span>
+            <span class="vb vb-{{ day.score or 'gray' }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper if day.score else 'NO DATA' }}</span>
         </div>
         {% endfor %}
     </div>
@@ -586,6 +654,12 @@
         }
 
         function onAlert(m) {
+            // Skip if this event is already in the server-rendered list above,
+            // so an alert active at page load isn't shown twice
+            var rendered = document.querySelectorAll('#nws-alerts [data-event]');
+            for (var i = 0; i < rendered.length; i++) {
+                if (rendered[i].getAttribute('data-event') === m.event) return;
+            }
             var txt = '⚠ ' + (m.event || 'Weather Alert');
             if (m.headline) txt += ' — ' + m.headline;
             bannerEl.textContent = txt;

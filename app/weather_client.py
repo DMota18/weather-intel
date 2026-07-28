@@ -1,11 +1,39 @@
-"""Open-Meteo API client for forecasts and recent history."""
+"""Open-Meteo API client for forecasts and recent history, plus NWS alerts."""
 
+import asyncio
+import logging
 import httpx
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from config import OPEN_METEO_FORECAST_URL
 
 ET = ZoneInfo("America/New_York")
+logger = logging.getLogger("weather-intel")
+
+NWS_ALERTS_URL = "https://api.weather.gov/alerts/active"
+NWS_USER_AGENT = "(weather-intel, dylanmota18@gmail.com)"
+
+RETRY_ATTEMPTS = 3
+
+
+async def _get_json(url: str, params: dict, headers: dict = None, timeout: int = 10) -> dict:
+    """GET with retries and exponential backoff (1s, 2s) — a single upstream
+    blip must not turn into a failed pour/seal verdict."""
+    last_exc = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url, params=params, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as e:
+            last_exc = e
+            if attempt < RETRY_ATTEMPTS - 1:
+                delay = 2 ** attempt
+                logger.warning("Fetch failed (attempt %d/%d), retrying in %ds: %s",
+                               attempt + 1, RETRY_ATTEMPTS, delay, e)
+                await asyncio.sleep(delay)
+    raise last_exc
 
 HOURLY_PARAMS = [
     "temperature_2m",
@@ -32,14 +60,17 @@ async def fetch_forecast_48h(lat: float, lon: float) -> dict:
         "forecast_hours": 48,
     }
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(OPEN_METEO_FORECAST_URL, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    return await _get_json(OPEN_METEO_FORECAST_URL, params)
 
 
 async def fetch_last_24h(lat: float, lon: float) -> dict:
-    """Fetch last 24 hours of actual weather from Open-Meteo."""
+    """Fetch recent weather from Open-Meteo (yesterday + today).
+
+    NOTE: the response covers whole calendar days — yesterday 00:00 through
+    today 23:00 local, with hours after "now" filled with FORECAST values.
+    Callers must slice to the true last 24 hours by timestamp; taking the
+    tail of the list gives today-including-future, not the last 24h.
+    """
     now = datetime.now(ET)
     end_date = now.strftime("%Y-%m-%d")
     start_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -56,10 +87,53 @@ async def fetch_last_24h(lat: float, lon: float) -> dict:
         "end_date": end_date,
     }
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(OPEN_METEO_FORECAST_URL, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    return await _get_json(OPEN_METEO_FORECAST_URL, params)
+
+
+async def fetch_nws_alerts(lat: float, lon: float) -> list[dict]:
+    """Fetch active NWS alerts for a point (severe weather awareness)."""
+    params = {"point": f"{lat},{lon}", "status": "actual", "message_type": "alert"}
+    headers = {"User-Agent": NWS_USER_AGENT}
+    data = await _get_json(NWS_ALERTS_URL, params, headers=headers)
+    return data.get("features", [])
+
+
+# Anything Severe/Extreme always passes; keywords catch lower-severity events
+# that still matter for concrete work.
+ALERT_KEYWORDS = [
+    "freeze", "frost", "wind", "thunder", "hail", "flood", "ice",
+    "tornado", "heat", "storm", "snow", "blizzard", "winter", "rain", "hurricane",
+]
+
+_SEVERITY_RANK = {"Extreme": 0, "Severe": 1, "Moderate": 2, "Minor": 3}
+
+
+def alert_is_relevant(props: dict) -> bool:
+    if (props.get("severity") or "") in ("Extreme", "Severe"):
+        return True
+    text = f"{props.get('event') or ''} {props.get('headline') or ''}".lower()
+    return any(kw in text for kw in ALERT_KEYWORDS)
+
+
+def parse_alerts(features: list[dict]) -> list[dict]:
+    """Filter NWS alert features to concrete-relevant ones, most severe first."""
+    alerts = []
+    for feature in features:
+        props = feature.get("properties", {})
+        if not alert_is_relevant(props):
+            continue
+        alerts.append({
+            "event": props.get("event", ""),
+            "headline": props.get("headline", ""),
+            "severity": props.get("severity", ""),
+            "urgency": props.get("urgency", ""),
+            "areas": props.get("areaDesc", ""),
+            "onset": props.get("onset", ""),
+            "expires": props.get("expires", ""),
+            "description": (props.get("description") or "")[:300],
+        })
+    alerts.sort(key=lambda a: _SEVERITY_RANK.get(a["severity"], 4))
+    return alerts
 
 
 def parse_forecast_hours(data: dict) -> list[dict]:
