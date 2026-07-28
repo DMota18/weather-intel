@@ -106,8 +106,40 @@ class TestPourScoring:
 
 class TestSealerScoring:
     def test_safe_to_seal(self):
-        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5, dewpoint_f=55)
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55, wind_mph=5, min_temp_next_12h=60)
         assert score == "green"
+        assert "data" not in factors
+
+    def test_missing_wind_or_cure_temp_blocks_green(self):
+        # Green requires the full picture — omitting wind or the overnight low caps at yellow
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55)
+        assert factors["data"] == "yellow"
+        assert score == "yellow"
+
+    def test_cold_night_after_warm_afternoon_is_red(self):
+        # 70°F at application time must not hide a 35°F night — sealer cures overnight
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55, wind_mph=5, min_temp_next_12h=35)
+        assert factors["cure_temp"] == "red"
+        assert score == "red"
+
+    def test_cool_night_is_yellow(self):
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55, wind_mph=5, min_temp_next_12h=45)
+        assert factors["cure_temp"] == "yellow"
+
+    def test_high_wind_is_red(self):
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55, wind_mph=18, min_temp_next_12h=60)
+        assert factors["wind"] == "red"
+        assert score == "red"
+
+    def test_moderate_wind_is_yellow(self):
+        score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0, precip_prob_next_24h=5,
+                                           dewpoint_f=55, wind_mph=12, min_temp_next_12h=60)
+        assert factors["wind"] == "yellow"
 
     def test_rain_last_24h_red(self):
         score, factors = score_sealer_hour(temp_f=70, humidity_pct=50, precip_last_24h_in=0.5, precip_prob_next_24h=5)
@@ -192,6 +224,18 @@ class TestCureWindow:
         assert factors["rain_during_cure"] == "red"
         assert overall == "red"
 
+    def test_gusts_scored_even_when_sustained_is_calm(self):
+        # 10mph sustained but 40mph gusts — gusts drive shrinkage cracking
+        hours = [dict(self._hour(wind=10), wind_gust_mph=40) for _ in range(48)]
+        overall, factors, issues = score_cure_window(hours)
+        assert factors["wind_drying"] == "red"
+        assert any("gust" in i.lower() for i in issues)
+
+    def test_moderate_gusts_yellow(self):
+        hours = [dict(self._hour(wind=10), wind_gust_mph=28) for _ in range(48)]
+        _, factors, _ = score_cure_window(hours)
+        assert factors["wind_drying"] == "yellow"
+
 
 class TestSummarizeDay:
     def _mk(self, pairs):
@@ -211,12 +255,17 @@ class TestSummarizeDay:
         assert summarize_day(day) == "green"
 
     def test_unscored_working_hour_caps_at_yellow(self):
-        day = self._mk([(h, "green") for h in range(7, 17)] + [(17, None)])
+        day = self._mk([(h, "green") for h in range(7, 16)] + [(16, None)])
         assert summarize_day(day) == "yellow"
 
     def test_any_red_wins(self):
-        day = self._mk([(h, "green") for h in range(7, 17)] + [(17, "red")])
+        day = self._mk([(h, "green") for h in range(7, 16)] + [(16, "red")])
         assert summarize_day(day) == "red"
+
+    def test_hour_17_outside_working_window(self):
+        # Working day is 7AM–5PM: hour 17 (5–6PM) matches find_best_window's exclusion
+        day = self._mk([(h, "green") for h in range(7, 17)] + [(17, "red")])
+        assert summarize_day(day) == "green"
 
     def test_night_hours_ignored(self):
         day = self._mk([(3, "red"), (22, "red")] + [(h, "green") for h in range(7, 18)])

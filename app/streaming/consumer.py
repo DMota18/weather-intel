@@ -64,13 +64,27 @@ def process_alert(message):
     logger.warning("ALERT: %s - %s", message.get("event"), message.get("headline"))
 
 
+def _checkpoint_key(stream_name):
+    return f"consumer:last:{stream_name}"
+
+
+def _load_last_ids():
+    """Resume from the persisted checkpoint so a restart doesn't drop
+    messages published while the consumer was down ('$' skips backlog)."""
+    last_ids = {}
+    for stream in (STREAM_WEATHER, STREAM_ALERTS):
+        try:
+            last_ids[stream] = REDIS.get(_checkpoint_key(stream)) or "$"
+        except redis.ConnectionError:
+            last_ids[stream] = "$"
+    return last_ids
+
+
 def run():
     logger.info("Weather Stream Consumer starting — reading %s, %s", STREAM_WEATHER, STREAM_ALERTS)
 
-    last_ids = {
-        STREAM_WEATHER: "$",
-        STREAM_ALERTS: "$",
-    }
+    last_ids = _load_last_ids()
+    logger.info("Resuming from checkpoints: %s", last_ids)
 
     while True:
         try:
@@ -89,6 +103,8 @@ def run():
                         process_weather_update(msg_data)
                     elif stream_name == STREAM_ALERTS:
                         process_alert(msg_data)
+
+                    REDIS.set(_checkpoint_key(stream_name), msg_id)
 
         except redis.ConnectionError:
             logger.error("Redis connection lost, reconnecting in 5s")

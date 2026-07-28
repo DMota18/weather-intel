@@ -373,16 +373,20 @@
                 <strong>Current readings:</strong><br>
                 {% if sealer_details.current_temp is not none %}Temp: {{ sealer_details.current_temp|round(1) }}°F{% endif %}
                 {% if sealer_details.current_humidity is not none %} · Humidity: {{ sealer_details.current_humidity|round(0)|int }}%{% endif %}
-                {% if sealer_details.dewpoint_spread is not none %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}<br>
+                {% if sealer_details.current_wind is not none %} · Wind: {{ sealer_details.current_wind|round(0)|int }}mph{% endif %}
+                {% if sealer_details.dewpoint_spread is not none %} · Dewpoint spread: {{ sealer_details.dewpoint_spread }}°F{% endif %}
+                {% if sealer_details.min_temp_next_12h is not none %} · Low next 12h: {{ sealer_details.min_temp_next_12h|round(0)|int }}°F{% endif %}<br>
                 Rain last 24h: {% if sealer_details.total_precip_24h is none %}Unknown (missing data){% elif sealer_details.total_precip_24h == 0 %}None{% else %}{{ sealer_details.total_precip_24h }}"{% endif %}
                 · Max rain chance next 24h: {{ sealer_details.max_precip_prob|round(0)|int if sealer_details.max_precip_prob is not none else '—' }}%
             </div>
             <div class="dp-threshold" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
                 <strong>Thresholds:</strong><br>
                 Temp: 50–90°F green · 40–50°F caution · &lt;40°F no<br>
+                Low next 12h: ≥50°F green · 40–50°F caution · &lt;40°F no<br>
                 Rain last 24h: None green · &lt;0.1" caution · Any red<br>
                 Rain next 24h: &lt;10% green · 10–40% caution · &gt;40% red<br>
                 Humidity: &lt;70% green · 70–85% caution · &gt;85% red<br>
+                Wind: &lt;10mph green · 10–15mph caution · &gt;15mph red<br>
                 Dewpoint spread: &gt;10°F green · 5–10°F caution · &lt;5°F red
             </div>
             <div class="dp-threshold" style="margin-top:6px; color:rgba(255,255,255,0.2); font-size:0.55rem; font-style:italic;">
@@ -396,7 +400,7 @@
         <div class="detail-panel-inner">
             <div class="dp-title">Pour Assessment — Work Hours (7AM–5PM)</div>
             {% for h in forecast_hours %}
-            {% if h.hour >= 7 and h.hour <= 17 %}
+            {% if h.hour >= 7 and h.hour < 17 %}
             {% set pp = h.precip_prob_pct or 0 %}
             <div class="dp-factor">
                 <div>
@@ -484,7 +488,7 @@
         {% set t = h.temp_f or t_min %}
         {% set pct = ((t - t_min) / t_range * 70 + 15) %}
         {% set pp = h.precip_prob_pct or 0 %}
-        <div class="u-row" {% if h.hour < 7 or h.hour > 17 %}style="opacity:0.3"{% endif %}>
+        <div class="u-row" {% if h.hour < 7 or h.hour >= 17 %}style="opacity:0.3"{% endif %}>
             <div class="u-time">{{ "%02d"|format(h.hour) }}</div>
             <div class="u-temp-col" style="{% if t < 40 %}color:#64b5f6{% elif t < 50 %}color:#4dd0e1{% elif t <= 90 %}color:#fff{% elif t <= 95 %}color:#ffb74d{% else %}color:#ef5350{% endif %}">{{ t|round(0)|int }}°</div>
             <div class="u-bar-col">

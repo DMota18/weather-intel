@@ -68,7 +68,8 @@ def score_pour_hour(temp_f, humidity_pct, wind_mph, precip_prob_pct, dewpoint_f=
         return "green", factors
 
 
-def score_sealer_hour(temp_f, humidity_pct, precip_last_24h_in, precip_prob_next_24h, dewpoint_f=None):
+def score_sealer_hour(temp_f, humidity_pct, precip_last_24h_in, precip_prob_next_24h,
+                      dewpoint_f=None, wind_mph=None, min_temp_next_12h=None):
     factors = {}
 
     if temp_f is not None:
@@ -78,6 +79,24 @@ def score_sealer_hour(temp_f, humidity_pct, precip_last_24h_in, precip_prob_next
             factors["temperature"] = "yellow"
         else:
             factors["temperature"] = "red"
+
+    # Sealer cures over hours — a warm afternoon reading hides a cold night
+    if min_temp_next_12h is not None:
+        if min_temp_next_12h >= 50:
+            factors["cure_temp"] = "green"
+        elif min_temp_next_12h >= 40:
+            factors["cure_temp"] = "yellow"
+        else:
+            factors["cure_temp"] = "red"
+
+    # Overspray drift and wind-blown debris onto wet sealer
+    if wind_mph is not None:
+        if wind_mph < 10:
+            factors["wind"] = "green"
+        elif wind_mph < 15:
+            factors["wind"] = "yellow"
+        else:
+            factors["wind"] = "red"
 
     if humidity_pct is not None:
         if humidity_pct < 70:
@@ -115,7 +134,8 @@ def score_sealer_hour(temp_f, humidity_pct, precip_last_24h_in, precip_prob_next
     if not factors:
         return None, factors
 
-    if temp_f is None or humidity_pct is None or precip_last_24h_in is None or precip_prob_next_24h is None:
+    if (temp_f is None or humidity_pct is None or precip_last_24h_in is None
+            or precip_prob_next_24h is None or wind_mph is None or min_temp_next_12h is None):
         factors["data"] = "yellow"
 
     if "red" in factors.values():
@@ -145,6 +165,7 @@ def score_cure_window(hourly_forecast: list[dict]) -> tuple:
     probs_24h = [h["precip_prob_pct"] for h in first_24h if h.get("precip_prob_pct") is not None]
     precips_24h = [h["precip_in"] for h in first_24h if h.get("precip_in") is not None]
     winds_24h = [h["wind_mph"] for h in first_24h if h.get("wind_mph") is not None]
+    gusts_24h = [h["wind_gust_mph"] for h in first_24h if h.get("wind_gust_mph") is not None]
 
     if not temps and not probs_24h and not precips_24h and not winds_24h:
         issues.append("No usable forecast data — cannot assess cure window")
@@ -208,19 +229,38 @@ def score_cure_window(hourly_forecast: list[dict]) -> tuple:
             factors["heat_stress"] = "red"
             issues.append(f"Extreme heat ({max_temp:.0f}°F) — rapid moisture loss, high crack risk")
 
-    # Check for high wind (surface drying)
+    # Check for high wind (surface drying) — sustained and gusts scored
+    # separately (gusts drive plastic-shrinkage cracking; higher thresholds),
+    # worst of the two wins
+    wind_levels = []
     if winds_24h:
         max_wind = max(winds_24h)
         if max_wind < 15:
-            factors["wind_drying"] = "green"
+            wind_levels.append("green")
         elif max_wind < 25:
-            factors["wind_drying"] = "yellow"
-            issues.append(f"Wind gusts to {max_wind:.0f}mph — accelerates surface drying")
+            wind_levels.append("yellow")
+            issues.append(f"Sustained wind to {max_wind:.0f}mph — accelerates surface drying")
         else:
-            factors["wind_drying"] = "red"
-            issues.append(f"High wind ({max_wind:.0f}mph) — significant surface drying and crack risk")
+            wind_levels.append("red")
+            issues.append(f"High sustained wind ({max_wind:.0f}mph) — significant surface drying and crack risk")
     else:
         missing.append("wind")
+
+    if gusts_24h:
+        max_gust = max(gusts_24h)
+        if max_gust < 25:
+            wind_levels.append("green")
+        elif max_gust < 35:
+            wind_levels.append("yellow")
+            issues.append(f"Wind gusts to {max_gust:.0f}mph — accelerates surface drying")
+        else:
+            wind_levels.append("red")
+            issues.append(f"Severe wind gusts ({max_gust:.0f}mph) — high surface-drying and crack risk")
+
+    if wind_levels:
+        factors["wind_drying"] = ("red" if "red" in wind_levels
+                                  else "yellow" if "yellow" in wind_levels
+                                  else "green")
 
     if missing:
         factors["data"] = "yellow"
@@ -242,9 +282,10 @@ def summarize_day(day_hours, start_hour=7, end_hour=17):
 
     Fail-safe: a day with zero scored working hours returns None ("no data",
     never green), and any unscored working hour caps the day at yellow.
-    end_hour is inclusive.
+    end_hour is EXCLUSIVE — the default 7..17 is 7AM–5PM, the same window
+    find_best_window uses, so day colors and window labels always agree.
     """
-    window = [h for h in day_hours if start_hour <= h["hour"] <= end_hour]
+    window = [h for h in day_hours if start_hour <= h["hour"] < end_hour]
     scores = [h.get("pour_score") for h in window if h.get("pour_score")]
 
     if not scores:

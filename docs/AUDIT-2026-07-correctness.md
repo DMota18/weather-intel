@@ -20,7 +20,19 @@ Verdict: **RED** — see bottom.
 > scripts/cache_forecasts.py now exists (48h scored snapshots into
 > weather_forecasts, exit 1 only on total failure). H5: all upstream fetches
 > retry with backoff, then fall back to last-known-good data explicitly marked
-> stale, then return an honest 503 "treat as NO-GO". Medium/Low items remain
+> stale, then return an honest 503 "treat as NO-GO".
+>
+> Medium items M1–M8 are also fixed: M1 `is not None` in get_historical (0°F /
+> 0.00" preserved); M2 working window unified to 7 ≤ hour < 17 everywhere;
+> M3 top-level best_window now carries its date; M4 cure check scores gusts
+> (25/35 mph) alongside sustained wind (15/25) with accurate messages; M5
+> sealer scoring adds a wind factor (10/15 mph) and the next-12h minimum temp
+> (a warm afternoon reading no longer hides a freezing night), both required
+> for green; M6 the stream consumer checkpoints its position in Redis instead
+> of dropping backlog on restart; M7 pipeline failures push to a phone via
+> WI_ALERT_NTFY_TOPIC / WI_ALERT_WEBHOOK_URL (log-only fallback warns loudly);
+> M8 historical ETL scores cap at yellow when temp/precip observations are
+> missing, and mart_job_weather exposes missing_precip_days. Low items remain
 > open.
 
 ---

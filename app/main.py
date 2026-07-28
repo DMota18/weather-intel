@@ -188,8 +188,19 @@ def _sealer_inputs(history_hours, forecast_hours):
     else:
         max_precip_prob = None
 
+    # Sealer cures overnight — the coldest of the next 12h is what matters,
+    # not the reading at application time. Poor coverage → unknown, but
+    # partial data already showing cold is kept (it can only get worse).
+    temps_12h = [h["temp_f"] for h in next_24h[:12] if h["temp_f"] is not None]
+    if len(temps_12h) >= 10:
+        min_temp_next_12h = min(temps_12h)
+    elif temps_12h and min(temps_12h) < 50:
+        min_temp_next_12h = min(temps_12h)
+    else:
+        min_temp_next_12h = None
+
     current = recent_hours[-1] if recent_hours else {}
-    return recent_hours, next_24h, total_precip_24h, max_precip_prob, current
+    return recent_hours, next_24h, total_precip_24h, max_precip_prob, current, min_temp_next_12h
 
 
 # --- Data fetch with graceful degradation ---
@@ -315,8 +326,6 @@ async def get_forecast(town: str):
         )
         scored_hours.append({**h, "pour_score": score, "pour_factors": factors})
 
-    best_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in scored_hours])
-
     days = {}
     for h in scored_hours:
         day_key = h["time"][:10]
@@ -351,6 +360,16 @@ async def get_forecast(town: str):
             "hours": day_hours,
         })
 
+    # Overall best window carries its date — "08:00-12:00" alone could be
+    # today or tomorrow, which is not a distinction to guess at
+    best_window = None
+    for day in day_summaries:
+        w = day["best_window"]
+        if w:
+            length = int(w[6:8]) - int(w[:2])
+            if best_window is None or length > best_window["hours"]:
+                best_window = {"date": day["date"], "window": w, "hours": length}
+
     return {
         "town": station["name"],
         "covers": station["covers"],
@@ -373,7 +392,7 @@ async def sealer_check(town: str):
     history_hours, hist_fetched_at, hist_stale = await _get_history_hours(station)
     forecast_hours, fc_fetched_at, fc_stale = await _get_forecast_hours(station)
 
-    recent_hours, next_24h, total_precip_24h, max_precip_prob, current = _sealer_inputs(
+    recent_hours, next_24h, total_precip_24h, max_precip_prob, current, min_temp_next_12h = _sealer_inputs(
         history_hours, forecast_hours
     )
 
@@ -388,6 +407,8 @@ async def sealer_check(town: str):
         precip_last_24h_in=total_precip_24h,
         precip_prob_next_24h=max_precip_prob,
         dewpoint_f=current.get("dewpoint_f"),
+        wind_mph=current.get("wind_mph"),
+        min_temp_next_12h=min_temp_next_12h,
     )
 
     details = []
@@ -402,6 +423,10 @@ async def sealer_check(town: str):
         details.append(f"Temp range: {min_temp:.0f}-{max_temp:.0f}°F")
     if current.get("humidity_pct") is not None:
         details.append(f"Current humidity: {current['humidity_pct']:.0f}%")
+    if current.get("wind_mph") is not None:
+        details.append(f"Current wind: {current['wind_mph']:.0f} mph")
+    if min_temp_next_12h is not None:
+        details.append(f"Low next 12h: {min_temp_next_12h:.0f}°F")
     if max_precip_prob is not None:
         details.append(f"Max rain chance next 24h: {max_precip_prob:.0f}%")
     if current.get("dewpoint_f") is not None and current.get("temp_f") is not None:
@@ -431,6 +456,7 @@ async def sealer_check(town: str):
             "max_humidity_pct": max_humidity,
         },
         "next_24h_max_precip_prob": max_precip_prob,
+        "next_12h_min_temp_f": min_temp_next_12h,
         "stale": hist_stale or fc_stale,
         "data_fetched_at": min(hist_fetched_at, fc_fetched_at).isoformat(),
         "alerts": await _get_alerts(station),
@@ -464,17 +490,22 @@ async def get_historical(town: str, date: str):
     if not row:
         raise HTTPException(status_code=404, detail=f"No data for {town} on {date}")
 
+    def _num(v):
+        # `is not None`, not truthiness: a real 0.0°F day or a bone-dry 0.00"
+        # reading must stay 0, not turn into "missing"
+        return float(v) if v is not None else None
+
     return {
         "town": station["name"],
         "date": str(row["observation_date"]),
         "source": "database",
-        "temp_max_f": float(row["temp_max_f"]) if row["temp_max_f"] else None,
-        "temp_min_f": float(row["temp_min_f"]) if row["temp_min_f"] else None,
-        "temp_mean_f": float(row["temp_mean_f"]) if row["temp_mean_f"] else None,
-        "precip_in": float(row["precip_in"]) if row["precip_in"] else None,
-        "snow_in": float(row["snow_in"]) if row["snow_in"] else None,
-        "wind_avg_mph": float(row["wind_avg_mph"]) if row["wind_avg_mph"] else None,
-        "wind_max_mph": float(row["wind_max_mph"]) if row["wind_max_mph"] else None,
+        "temp_max_f": _num(row["temp_max_f"]),
+        "temp_min_f": _num(row["temp_min_f"]),
+        "temp_mean_f": _num(row["temp_mean_f"]),
+        "precip_in": _num(row["precip_in"]),
+        "snow_in": _num(row["snow_in"]),
+        "wind_avg_mph": _num(row["wind_avg_mph"]),
+        "wind_max_mph": _num(row["wind_max_mph"]),
         "pour_score": row["pour_score"],
         "sealer_score": row["sealer_score"],
         "score_details": row["score_details"],
@@ -706,7 +737,7 @@ async def dashboard(request: Request, town: str = "worcester"):
         )
         scored_forecast.append({**h, "pour_score": score, "pour_factors": factors})
 
-    recent_hours, next_24h, total_precip_24h, max_precip_prob, current = _sealer_inputs(
+    recent_hours, next_24h, total_precip_24h, max_precip_prob, current, min_temp_next_12h = _sealer_inputs(
         history_hours, forecast_hours
     )
 
@@ -716,6 +747,8 @@ async def dashboard(request: Request, town: str = "worcester"):
         precip_last_24h_in=total_precip_24h,
         precip_prob_next_24h=max_precip_prob,
         dewpoint_f=current.get("dewpoint_f"),
+        wind_mph=current.get("wind_mph"),
+        min_temp_next_12h=min_temp_next_12h,
     )
 
     days = {}
@@ -760,6 +793,8 @@ async def dashboard(request: Request, town: str = "worcester"):
             "total_precip_24h": round(total_precip_24h, 2) if total_precip_24h is not None else None,
             "current_temp": current.get("temp_f"),
             "current_humidity": current.get("humidity_pct"),
+            "current_wind": current.get("wind_mph"),
+            "min_temp_next_12h": min_temp_next_12h,
             "max_precip_prob": max_precip_prob,
             "dewpoint_spread": round(current["temp_f"] - current["dewpoint_f"], 1) if current.get("temp_f") is not None and current.get("dewpoint_f") is not None else None,
         },

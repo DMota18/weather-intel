@@ -127,7 +127,7 @@ def parse_station_file(station_id, start_year):
 def compute_scores(row):
     temp_high = row.get("temp_max_f")
     temp_low = row.get("temp_min_f")
-    precip = row.get("precip_in") or 0
+    precip = row.get("precip_in")  # None = not observed; must not score as "dry"
     wind = row.get("wind_max_mph")
 
     pour_factors = {}
@@ -155,6 +155,13 @@ def compute_scores(row):
         else:
             pour_factors["wind"] = "red"
 
+    # Missing temp or precip caps the day at yellow — a "green day" claim
+    # needs the decisive observations. (Wind is excluded from the cap: GHCN
+    # wind coverage is sparse for decades of history and demanding it would
+    # recolor most of the archive; its factor still applies when present.)
+    if pour_factors and (temp_high is None or precip is None):
+        pour_factors["data"] = "yellow"
+
     if pour_factors:
         if "red" in pour_factors.values():
             pour_score = "red"
@@ -181,6 +188,9 @@ def compute_scores(row):
             sealer_factors["temperature"] = "yellow"
         else:
             sealer_factors["temperature"] = "red"
+
+    if sealer_factors and (precip is None or temp_high is None or temp_low is None):
+        sealer_factors["data"] = "yellow"
 
     if sealer_factors:
         if "red" in sealer_factors.values():
