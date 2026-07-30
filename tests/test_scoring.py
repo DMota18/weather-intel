@@ -4,7 +4,10 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
-from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window, summarize_day
+from scoring import (
+    score_pour_hour, score_sealer_hour, score_cure_window, find_best_window,
+    summarize_day, explain_pour_day, explain_sealer, _span_phrase, _clock,
+)
 
 
 class TestPourScoring:
@@ -313,3 +316,133 @@ class TestBestWindow:
     def test_empty_input(self):
         result = find_best_window([])
         assert result is None
+
+
+class TestClockAndSpans:
+    def test_clock_formats(self):
+        assert _clock(0) == "12am"
+        assert _clock(7) == "7am"
+        assert _clock(12) == "12pm"
+        assert _clock(13) == "1pm"
+        assert _clock(23) == "11pm"
+
+    def test_span_all_day(self):
+        assert _span_phrase(list(range(7, 17)), 7, 17) == "all day"
+
+    def test_span_before(self):
+        assert _span_phrase([7, 8, 9], 7, 17) == "before 10am"
+
+    def test_span_after(self):
+        assert _span_phrase([14, 15, 16], 7, 17) == "after 2pm"
+
+    def test_span_middle_range(self):
+        assert _span_phrase([10, 11, 12, 13], 7, 17) == "10am-2pm"
+
+    def test_span_scattered_few(self):
+        assert _span_phrase([8, 12, 15], 7, 17) == "8am, 12pm, 3pm"
+
+    def test_span_scattered_many(self):
+        assert "on and off" in _span_phrase([8, 10, 12, 14, 16], 7, 17)
+
+    def test_span_empty(self):
+        assert _span_phrase([], 7, 17) == ""
+
+
+class TestExplainPourDay:
+    def _day(self, per_hour):
+        """per_hour: {hour: (temp, humidity, wind, precip_prob)}"""
+        out = []
+        for hr, (t, hum, w, p) in sorted(per_hour.items()):
+            score, factors = score_pour_hour(t, hum, w, p)
+            out.append({"hour": hr, "temp_f": t, "humidity_pct": hum, "wind_mph": w,
+                        "precip_prob_pct": p, "pour_score": score, "pour_factors": factors})
+        return out
+
+    def _good(self):
+        return {h: (72, 50, 5, 5) for h in range(7, 17)}
+
+    def test_clear_day_has_no_reasons(self):
+        assert explain_pour_day(self._day(self._good())) == []
+
+    def test_afternoon_rain_named_with_window(self):
+        spec = self._good()
+        for h in range(12, 17):
+            spec[h] = (70, 60, 8, 70)
+        reasons = explain_pour_day(self._day(spec))
+        assert "Rain likely" in reasons[0]
+        assert "70%" in reasons[0]
+        assert "after 12pm" in reasons[0]
+
+    def test_red_factor_outranks_yellow_factor(self):
+        # Cold morning (yellow) + high wind (red): the red must lead, because
+        # compact views show only the first reason and it must explain the verdict
+        spec = self._good()
+        for h in range(7, 10):
+            spec[h] = (42, 55, 7, 5)
+        for h in range(14, 17):
+            spec[h] = (72, 50, 24, 5)
+        reasons = explain_pour_day(self._day(spec))
+        assert "High wind" in reasons[0]
+        assert any("Cold" in r for r in reasons)
+
+    def test_cold_and_hot_read_differently(self):
+        cold = explain_pour_day(self._day({h: (35, 50, 5, 5) for h in range(7, 17)}))
+        hot = explain_pour_day(self._day({h: (98, 40, 5, 5) for h in range(7, 17)}))
+        assert "Too cold" in cold[0] and "35" in cold[0]
+        assert "Too hot" in hot[0] and "98" in hot[0]
+
+    def test_no_working_hours_says_no_go(self):
+        evening = self._day({h: (70, 50, 5, 90) for h in range(18, 24)})
+        reasons = explain_pour_day(evening)
+        assert len(reasons) == 1
+        assert "no-go" in reasons[0]
+
+    def test_unscorable_hours_says_no_go(self):
+        hours = [{"hour": h, "temp_f": None, "humidity_pct": None, "wind_mph": None,
+                  "precip_prob_pct": None, "pour_score": None, "pour_factors": {}}
+                 for h in range(7, 17)]
+        assert "no-go" in explain_pour_day(hours)[0]
+
+    def test_missing_data_reported(self):
+        spec = self._good()
+        hours = self._day(spec)
+        hours[3] = {**hours[3], "pour_score": None, "pour_factors": {}}
+        reasons = explain_pour_day(hours)
+        assert any("Missing data" in r for r in reasons)
+
+    def test_hour_17_not_described(self):
+        # 5PM is outside the working window; a red 5pm must not generate a reason
+        spec = self._good()
+        spec[17] = (70, 50, 5, 95)
+        assert explain_pour_day(self._day(spec)) == []
+
+
+class TestExplainSealer:
+    def test_wet_slab_leads_with_amount(self):
+        _, factors = score_sealer_hour(70, 50, 0.42, 5, 50, 5, 60)
+        reasons = explain_sealer(factors, 0.42, 5, 60, {"temp_f": 70, "humidity_pct": 50, "wind_mph": 5, "dewpoint_f": 50})
+        assert "0.42" in reasons[0]
+        assert "dry" in reasons[0]
+
+    def test_cold_night_explained(self):
+        _, factors = score_sealer_hour(70, 50, 0, 5, 50, 5, 34)
+        reasons = explain_sealer(factors, 0, 5, 34, {"temp_f": 70, "humidity_pct": 50, "wind_mph": 5, "dewpoint_f": 50})
+        assert any("overnight" in r and "34" in r for r in reasons)
+
+    def test_wind_explained_with_consequence(self):
+        _, factors = score_sealer_hour(70, 50, 0, 5, 50, 19, 60)
+        reasons = explain_sealer(factors, 0, 5, 60, {"temp_f": 70, "humidity_pct": 50, "wind_mph": 19, "dewpoint_f": 50})
+        assert any("windy" in r.lower() for r in reasons)
+
+    def test_clear_conditions_no_reasons(self):
+        _, factors = score_sealer_hour(72, 45, 0, 5, 50, 4, 62)
+        assert explain_sealer(factors, 0, 5, 62, {"temp_f": 72, "humidity_pct": 45, "wind_mph": 4, "dewpoint_f": 50}) == []
+
+    def test_missing_data_surfaced(self):
+        _, factors = score_sealer_hour(70, 50, None, 5, 50, 5, 60)
+        reasons = explain_sealer(factors, None, 5, 60, {"temp_f": 70, "humidity_pct": 50, "wind_mph": 5, "dewpoint_f": 50})
+        assert any("unavailable" in r for r in reasons)
+
+    def test_no_crash_on_empty_current(self):
+        _, factors = score_sealer_hour(None, None, None, None, None, None, None)
+        assert explain_sealer(factors or {}, None, None, None, None) == []

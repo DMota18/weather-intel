@@ -277,6 +277,184 @@ def score_cure_window(hourly_forecast: list[dict]) -> tuple:
     return overall, factors, issues
 
 
+# --- Plain-English explanations -------------------------------------------
+# The verdict colors say go/no-go; these say WHY, in the words you'd use on
+# site. Derived from the same factors the scorers produce, so an explanation
+# can never disagree with the verdict it sits under.
+
+_FACTOR_ORDER = ["precipitation", "temperature", "wind", "humidity", "dewpoint", "data"]
+
+
+def _clock(hour):
+    """13 -> '1pm', 0 -> '12am', 7 -> '7am'."""
+    suffix = "am" if hour < 12 else "pm"
+    h12 = hour % 12 or 12
+    return f"{h12}{suffix}"
+
+
+def _span_phrase(hours, start_hour, end_hour):
+    """Describe a set of working hours compactly: 'all day', 'before 9am',
+    'after 1pm', '10am-2pm', or '7am, 11am' for scattered hours."""
+    if not hours:
+        return ""
+    hours = sorted(set(hours))
+    window = list(range(start_hour, end_hour))
+    if len(hours) == len(window):
+        return "all day"
+
+    # Contiguous run?
+    if hours == list(range(hours[0], hours[-1] + 1)):
+        if hours[0] == start_hour:
+            return f"before {_clock(hours[-1] + 1)}"
+        if hours[-1] == end_hour - 1:
+            return f"after {_clock(hours[0])}"
+        return f"{_clock(hours[0])}-{_clock(hours[-1] + 1)}"
+
+    if len(hours) <= 3:
+        return ", ".join(_clock(h) for h in hours)
+    return f"{_clock(hours[0])}-{_clock(hours[-1] + 1)}, on and off"
+
+
+def explain_pour_day(day_hours, start_hour=7, end_hour=17):
+    """Short plain-English reasons a day isn't clear, worst factor first.
+
+    Returns [] for a fully green working window, and a single "no data"
+    reason when nothing in the window could be scored.
+    """
+    window = [h for h in day_hours if start_hour <= h["hour"] < end_hour]
+    if not window:
+        return ["No forecast data for working hours — treat as no-go"]
+
+    scored = [h for h in window if h.get("pour_score")]
+    if not scored:
+        return ["No forecast data for working hours — treat as no-go"]
+
+    # Collect per factor, then sort reds ahead of yellows: the first reason
+    # has to be the one that actually drove the verdict, since compact views
+    # show only reasons[0]. Ties break on factor importance.
+    found = []
+    for rank, factor in enumerate(_FACTOR_ORDER):
+        red = [h for h in window if h.get("pour_factors", {}).get(factor) == "red"]
+        yellow = [h for h in window if h.get("pour_factors", {}).get(factor) == "yellow"]
+        bad = red or yellow
+        if not bad:
+            continue
+
+        span = _span_phrase([h["hour"] for h in bad], start_hour, end_hour)
+        severity = "red" if red else "yellow"
+        phrase = _factor_phrase(factor, bad, span, severity)
+        if phrase:
+            found.append((0 if red else 1, rank, phrase))
+
+    found.sort(key=lambda x: (x[0], x[1]))
+    reasons = [phrase for _, _, phrase in found]
+
+    unscored = len(window) - len(scored)
+    if unscored and not any(r.startswith("Missing") for r in reasons):
+        reasons.append(f"Missing data for {unscored} working hour(s)")
+
+    return reasons
+
+
+def _factor_phrase(factor, bad_hours, span, severity):
+    """One human sentence for a factor over the hours it misbehaves."""
+    if factor == "precipitation":
+        probs = [h["precip_prob_pct"] for h in bad_hours if h.get("precip_prob_pct") is not None]
+        if not probs:
+            return f"Rain risk {span}"
+        peak = max(probs)
+        verb = "Rain likely" if severity == "red" else "Rain possible"
+        return f"{verb} — {peak:.0f}% chance {span}"
+
+    if factor == "temperature":
+        temps = [h["temp_f"] for h in bad_hours if h.get("temp_f") is not None]
+        if not temps:
+            return f"Temperature out of range {span}"
+        # Cold and hot read very differently to a finisher
+        if min(temps) < 50:
+            low = min(temps)
+            word = "Too cold" if severity == "red" else "Cold"
+            return f"{word} — {low:.0f}°F {span}"
+        high = max(temps)
+        word = "Too hot" if severity == "red" else "Hot"
+        return f"{word} — {high:.0f}°F {span}"
+
+    if factor == "wind":
+        winds = [h["wind_mph"] for h in bad_hours if h.get("wind_mph") is not None]
+        if not winds:
+            return f"Windy {span}"
+        peak = max(winds)
+        word = "High wind" if severity == "red" else "Breezy"
+        return f"{word} — {peak:.0f}mph {span}"
+
+    if factor == "humidity":
+        hums = [h["humidity_pct"] for h in bad_hours if h.get("humidity_pct") is not None]
+        if not hums:
+            return f"Humidity out of range {span}"
+        if max(hums) > 70:
+            return f"Humid — {max(hums):.0f}% {span}"
+        return f"Very dry air — {min(hums):.0f}% {span} (surface may crust)"
+
+    if factor == "dewpoint":
+        spreads = [h["temp_f"] - h["dewpoint_f"] for h in bad_hours
+                   if h.get("temp_f") is not None and h.get("dewpoint_f") is not None]
+        if not spreads:
+            return f"Narrow dew point spread {span}"
+        return f"Dew point within {min(spreads):.0f}°F of air temp {span} — slow drying"
+
+    if factor == "data":
+        return f"Missing forecast data {span}"
+
+    return ""
+
+
+def explain_sealer(factors, total_precip_24h=None, max_precip_prob=None,
+                   min_temp_next_12h=None, current=None):
+    """Short plain-English reasons for the sealer verdict, worst first."""
+    current = current or {}
+    reasons = []
+
+    rain_last = factors.get("rain_last_24h")
+    if rain_last == "red":
+        reasons.append(f"{total_precip_24h:.2f}\" rain in last 24h — slab needs to dry"
+                       if total_precip_24h is not None else "Rain in last 24h — slab needs to dry")
+    elif rain_last == "yellow":
+        reasons.append(f"Trace rain in last 24h ({total_precip_24h:.2f}\") — check the slab is dry"
+                       if total_precip_24h is not None else "Trace rain in last 24h — check the slab")
+
+    rain_next = factors.get("rain_next_24h")
+    if rain_next in ("red", "yellow") and max_precip_prob is not None:
+        word = "Rain likely" if rain_next == "red" else "Rain possible"
+        reasons.append(f"{word} in next 24h — {max_precip_prob:.0f}% chance")
+
+    if factors.get("cure_temp") in ("red", "yellow") and min_temp_next_12h is not None:
+        word = "Too cold overnight" if factors["cure_temp"] == "red" else "Cool overnight"
+        reasons.append(f"{word} — dropping to {min_temp_next_12h:.0f}°F while it cures")
+
+    if factors.get("temperature") in ("red", "yellow") and current.get("temp_f") is not None:
+        t = current["temp_f"]
+        word = "Too cold to apply" if factors["temperature"] == "red" else "Cold to apply"
+        reasons.append(f"{word} — {t:.0f}°F right now")
+
+    if factors.get("wind") in ("red", "yellow") and current.get("wind_mph") is not None:
+        word = "Too windy" if factors["wind"] == "red" else "Breezy"
+        reasons.append(f"{word} — {current['wind_mph']:.0f}mph (overspray and debris)")
+
+    if factors.get("humidity") in ("red", "yellow") and current.get("humidity_pct") is not None:
+        word = "Too humid" if factors["humidity"] == "red" else "Humid"
+        reasons.append(f"{word} — {current['humidity_pct']:.0f}% (slow cure)")
+
+    if factors.get("dewpoint") in ("red", "yellow"):
+        if current.get("temp_f") is not None and current.get("dewpoint_f") is not None:
+            spread = current["temp_f"] - current["dewpoint_f"]
+            reasons.append(f"Dew point within {spread:.0f}°F of air temp — condensation risk")
+
+    if factors.get("data") == "yellow":
+        reasons.append("Some readings unavailable — verdict capped at caution")
+
+    return reasons
+
+
 def summarize_day(day_hours, start_hour=7, end_hour=17):
     """Aggregate hourly pour scores into a day verdict for the working window.
 

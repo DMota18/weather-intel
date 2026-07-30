@@ -21,10 +21,13 @@ from fastapi.templating import Jinja2Templates
 
 from config import DB_CONFIG, STATIONS
 from weather_client import (
-    fetch_forecast_48h, fetch_last_24h, fetch_nws_alerts,
+    fetch_forecast, fetch_last_24h, fetch_nws_alerts,
     parse_forecast_hours, parse_history_hours, parse_alerts,
 )
-from scoring import score_pour_hour, score_sealer_hour, score_cure_window, find_best_window, summarize_day
+from scoring import (
+    score_pour_hour, score_sealer_hour, score_cure_window, find_best_window,
+    summarize_day, explain_pour_day, explain_sealer,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +80,15 @@ FORECAST_CACHE_TTL = timedelta(hours=1)
 HISTORY_CACHE_TTL = timedelta(minutes=30)
 ALERTS_CACHE_TTL = timedelta(minutes=5)
 _forecast_cache = {}
+
+# Days of forecast to fetch. Hourly detail is shown for HOURLY_DETAIL_HOURS;
+# the remaining days appear as day-level verdicts for scheduling only.
+FORECAST_DAYS = 7
+HOURLY_DETAIL_HOURS = 48
+# Working day: 7AM up to (not including) 5PM — one definition, used by
+# summarize_day, find_best_window, and the dashboard.
+WORK_START_HOUR = 7
+WORK_END_HOUR = 17
 
 
 def _cache_ttl(cache_type: str) -> timedelta:
@@ -161,6 +173,79 @@ def _upcoming_hours(hours):
     return [h for h in hours if _hour_dt(h) >= cutoff]
 
 
+def _clock_label(hour):
+    """13 -> '1p', 0 -> '12a' — compact 12-hour label for dense tables."""
+    return f"{hour % 12 or 12}{'a' if hour < 12 else 'p'}"
+
+
+def _window_label(window):
+    """'07:00-12:00' -> '7a-12p' to match the rest of the UI's clock style."""
+    if not window:
+        return None
+    try:
+        start, end = window.split("-")
+        return f"{_clock_label(int(start[:2]))}-{_clock_label(int(end[:2]))}"
+    except (ValueError, IndexError):
+        return window
+
+
+def _day_label(date_str):
+    """'Today' / 'Tomorrow' / 'Sat' instead of a bare 07-31."""
+    today = datetime.now(ET).date()
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return date_str
+    delta = (d - today).days
+    if delta == 0:
+        return "Today"
+    if delta == 1:
+        return "Tomorrow"
+    if delta == -1:
+        return "Yesterday"
+    return d.strftime("%a")
+
+
+def _group_by_day(scored_hours):
+    """Ordered {date: [hours]} — dict order follows the forecast, which is
+    chronological, so days come out in order."""
+    days = {}
+    for h in scored_hours:
+        days.setdefault(h["time"][:10], []).append(h)
+    return days
+
+
+def _build_day_summaries(days, temp_high_key="temp_high_f", temp_low_key="temp_low_f",
+                         detail_dates=None):
+    """Day-level verdicts with labels and plain-English reasons.
+
+    detail_dates: dates that have hourly detail (first 48h). Days beyond that
+    are marked outlook=True so the UI can present them as planning-only rather
+    than as an hour-by-hour commitment.
+    """
+    summaries = []
+    for day_key, day_hours in days.items():
+        temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
+        window = find_best_window(
+            [{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours],
+            WORK_START_HOUR, WORK_END_HOUR,
+        )
+        summaries.append({
+            "date": day_key,
+            "label": _day_label(day_key),
+            # None = no scorable working hours — surfaced as "no data", never green
+            "score": summarize_day(day_hours, WORK_START_HOUR, WORK_END_HOUR),
+            "reasons": explain_pour_day(day_hours, WORK_START_HOUR, WORK_END_HOUR),
+            temp_high_key: max(temps) if temps else None,
+            temp_low_key: min(temps) if temps else None,
+            "best_window": window,
+            "best_window_label": _window_label(window),
+            "outlook": detail_dates is not None and day_key not in detail_dates,
+            "hours": day_hours,
+        })
+    return summaries
+
+
 def _sealer_inputs(history_hours, forecast_hours):
     """Derive sealer-scoring inputs, treating data gaps as unknown (None).
 
@@ -212,14 +297,20 @@ def _sealer_inputs(history_hours, forecast_hours):
 # disappear and the fail-safe "no data" paths take over.
 
 async def _get_forecast_hours(station):
-    """Returns (hours, fetched_at, stale). Raises 503 when nothing is available."""
+    """Returns (hours, fetched_at, stale). Raises 503 when nothing is available.
+
+    Covers FORECAST_DAYS days of hourly data. Hourly detail is only shown for
+    the first 48h; beyond that the data feeds day-level verdicts only, because
+    hour-by-hour precipitation timing that far out isn't reliable enough to
+    schedule a pour against.
+    """
     sid = station["station_id"]
     cached = _get_cached_forecast(sid, "forecast48")
     if cached is not None:
         _, fetched_at = _forecast_cache[f"{sid}:forecast48"]
         return cached, fetched_at, False
     try:
-        data = await fetch_forecast_48h(station["lat"], station["lon"])
+        data = await fetch_forecast(station["lat"], station["lon"], days=FORECAST_DAYS)
         hours = parse_forecast_hours(data)
         _set_cached_forecast(sid, "forecast48", hours)
         return hours, datetime.now(ET), False
@@ -302,7 +393,12 @@ async def list_towns():
 
 @app.get("/api/v1/forecast/{town}")
 async def get_forecast(town: str):
-    """48-hour forecast with pour scoring.
+    """7-day forecast with pour scoring.
+
+    Days beyond the first 48 hours are marked "outlook": true. Their hourly
+    rows are still included, but treat only the day-level verdict as
+    actionable — hour-by-hour precipitation timing that far out is not
+    reliable enough to schedule a pour against.
 
     Note: scoring uses hourly temperature, humidity, wind, precipitation probability,
     and dew point. This differs from historical daily scores which use daily aggregates
@@ -328,39 +424,8 @@ async def get_forecast(town: str):
         )
         scored_hours.append({**h, "pour_score": score, "pour_factors": factors})
 
-    days = {}
-    for h in scored_hours:
-        day_key = h["time"][:10]
-        if day_key not in days:
-            days[day_key] = []
-        days[day_key].append(h)
-
-    day_summaries = []
-    for day_key, day_hours in days.items():
-        # None = no scorable working hours — surfaced as "no data", never green
-        day_score = summarize_day(day_hours)
-
-        temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
-        day_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours])
-
-        warnings = []
-        for h in day_hours:
-            if h.get("pour_factors", {}).get("wind") == "red":
-                warnings.append(f"Wind {h['wind_mph']:.0f}mph at {h['hour']:02d}:00")
-                break
-            if h.get("pour_factors", {}).get("precipitation") == "red":
-                warnings.append(f"Rain {h['precip_prob_pct']:.0f}% at {h['hour']:02d}:00")
-                break
-
-        day_summaries.append({
-            "date": day_key,
-            "score": day_score,
-            "temp_high_f": max(temps) if temps else None,
-            "temp_low_f": min(temps) if temps else None,
-            "best_window": day_window,
-            "warnings": warnings,
-            "hours": day_hours,
-        })
+    detail_dates = {h["time"][:10] for h in scored_hours[:HOURLY_DETAIL_HOURS]}
+    day_summaries = _build_day_summaries(_group_by_day(scored_hours), detail_dates=detail_dates)
 
     # Overall best window carries its date — "08:00-12:00" alone could be
     # today or tomorrow, which is not a distinction to guess at
@@ -370,7 +435,11 @@ async def get_forecast(town: str):
         if w:
             length = int(w[6:8]) - int(w[:2])
             if best_window is None or length > best_window["hours"]:
-                best_window = {"date": day["date"], "window": w, "hours": length}
+                best_window = {
+                    "date": day["date"], "label": day["label"],
+                    "window": w, "window_label": day["best_window_label"],
+                    "hours": length,
+                }
 
     return {
         "town": station["name"],
@@ -413,6 +482,9 @@ async def sealer_check(town: str):
         min_temp_next_12h=min_temp_next_12h,
     )
 
+    reasons = explain_sealer(factors, total_precip_24h, max_precip_prob,
+                             min_temp_next_12h, current)
+
     details = []
     if total_precip_24h is None:
         details.append("Rain in last 24h: unknown (missing data)")
@@ -444,6 +516,7 @@ async def sealer_check(town: str):
                     else "DO NOT SEAL" if score == "red"
                     else "NO DATA — DO NOT SEAL"),
         "factors": factors,
+        "reasons": reasons,
         "details": details,
         "current": {
             "temp_f": current.get("temp_f"),
@@ -527,7 +600,9 @@ async def cure_check(town: str):
     station = STATIONS[town]
 
     forecast_hours, fetched_at, stale = await _get_forecast_hours(station)
-    forecast_hours = _upcoming_hours(forecast_hours)
+    # Curing is a 48-hour question — slice explicitly so the longer 7-day
+    # fetch can't stretch freeze/heat checks across the whole week
+    forecast_hours = _upcoming_hours(forecast_hours)[:HOURLY_DETAIL_HOURS]
 
     overall, factors, issues = score_cure_window(forecast_hours)
 
@@ -735,7 +810,12 @@ async def dashboard(request: Request, town: str = "worcester"):
             precip_prob_pct=h["precip_prob_pct"],
             dewpoint_f=h["dewpoint_f"],
         )
-        scored_forecast.append({**h, "pour_score": score, "pour_factors": factors})
+        scored_forecast.append({
+            **h,
+            "pour_score": score,
+            "pour_factors": factors,
+            "hour_label": _clock_label(h["hour"]),
+        })
 
     recent_hours, next_24h, total_precip_24h, max_precip_prob, current, min_temp_next_12h = _sealer_inputs(
         history_hours, forecast_hours
@@ -751,27 +831,17 @@ async def dashboard(request: Request, town: str = "worcester"):
         min_temp_next_12h=min_temp_next_12h,
     )
 
-    days = {}
-    for h in scored_forecast:
-        day_key = h["time"][:10]
-        if day_key not in days:
-            days[day_key] = []
-        days[day_key].append(h)
+    # Hourly detail is the first 48h; later days are planning-only outlook
+    detail_hours = scored_forecast[:HOURLY_DETAIL_HOURS]
+    detail_dates = {h["time"][:10] for h in detail_hours}
+    day_summaries = _build_day_summaries(
+        _group_by_day(scored_forecast),
+        temp_high_key="temp_high", temp_low_key="temp_low",
+        detail_dates=detail_dates,
+    )
 
-    day_summaries = []
-    for day_key, day_hours in days.items():
-        # None = no scorable working hours — surfaced as "no data", never green
-        day_score = summarize_day(day_hours)
-        temps = [h["temp_f"] for h in day_hours if h["temp_f"] is not None]
-        day_window = find_best_window([{"hour": h["hour"], "score": h["pour_score"]} for h in day_hours])
-        day_summaries.append({
-            "date": day_key,
-            "score": day_score,
-            "temp_high": max(temps) if temps else None,
-            "temp_low": min(temps) if temps else None,
-            "best_window": day_window,
-            "hours": day_hours,
-        })
+    sealer_reasons = explain_sealer(sealer_factors, total_precip_24h, max_precip_prob,
+                                   min_temp_next_12h, current)
 
     data_as_of = None
     data_stale = fc_stale or hist_stale
@@ -789,6 +859,9 @@ async def dashboard(request: Request, town: str = "worcester"):
         "data_stale": data_stale,
         "sealer_score": sealer_score,
         "sealer_factors": sealer_factors,
+        "sealer_reasons": sealer_reasons,
+        "work_start_hour": WORK_START_HOUR,
+        "work_end_hour": WORK_END_HOUR,
         "sealer_details": {
             "total_precip_24h": round(total_precip_24h, 2) if total_precip_24h is not None else None,
             "current_temp": current.get("temp_f"),
@@ -799,7 +872,8 @@ async def dashboard(request: Request, town: str = "worcester"):
             "dewpoint_spread": round(current["temp_f"] - current["dewpoint_f"], 1) if current.get("temp_f") is not None and current.get("dewpoint_f") is not None else None,
         },
         "days": day_summaries,
-        "forecast_hours": scored_forecast,
+        "forecast_hours": detail_hours,
+        "outlook_days": [d for d in day_summaries if d["outlook"]],
     }
     return templates.TemplateResponse(request, "dashboard.html", context)
 
