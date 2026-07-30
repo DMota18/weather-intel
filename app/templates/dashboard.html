@@ -77,7 +77,9 @@
             margin: 0 16px;
             border-radius: 0 0 14px 14px;
         }
-        .detail-panel.open { max-height: 500px; }
+        /* Tall content (10 working hours + thresholds) was clipped by a fixed
+           500px cap; scroll inside the panel instead of hiding the tail. */
+        .detail-panel.open { max-height: 80vh; overflow-y: auto; }
         .detail-panel-inner { padding: 14px 16px; }
         .dp-title {
             font-size: 0.7rem;
@@ -299,7 +301,71 @@
         }
         .data-asof.data-stale { color: #ff9f0a; font-weight: 600; }
 
+        /* ---- Plain-English verdict reasons ---- */
+        .verdict-why {
+            padding: 0 20px 14px;
+            display: grid;
+            gap: 8px;
+        }
+        .why-block {
+            background: rgba(255,255,255,0.04);
+            border-left: 2px solid rgba(255,255,255,0.15);
+            border-radius: 0 8px 8px 0;
+            padding: 8px 12px;
+        }
+        .why-block.why-green { border-left-color: #34c759; }
+        .why-block.why-yellow { border-left-color: #ffcc00; }
+        .why-block.why-red { border-left-color: #ff453a; }
+        .why-block.why-gray { border-left-color: #98989d; }
+        .why-head {
+            font-size: 0.62rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+            color: rgba(255,255,255,0.45);
+            margin-bottom: 3px;
+        }
+        .why-line {
+            font-size: 0.78rem;
+            color: rgba(255,255,255,0.85);
+            line-height: 1.45;
+        }
+        .why-line + .why-line { margin-top: 2px; }
+        .why-ok { color: #34c759; }
+
+        /* ---- 7-day outlook ---- */
+        .ol-row {
+            display: flex;
+            align-items: center;
+            padding: 9px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .ol-row:last-child { border-bottom: none; }
+        .ol-day { width: 74px; font-size: 0.78rem; font-weight: 600; flex-shrink: 0; }
+        .ol-temps { width: 74px; font-size: 0.75rem; color: rgba(255,255,255,0.45); flex-shrink: 0; }
+        .ol-why { flex: 1; font-size: 0.68rem; color: rgba(255,255,255,0.5); padding-right: 8px; line-height: 1.35; }
+        .ol-badge { flex-shrink: 0; }
+        .outlook-note {
+            padding: 8px 16px 12px;
+            font-size: 0.58rem;
+            color: rgba(255,255,255,0.28);
+            line-height: 1.5;
+        }
+
         .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 20px 16px 40px; }
+
+        /* ---- Wider screens (desk / truck laptop): use the space ---- */
+        @media (min-width: 860px) {
+            body { max-width: 1000px; }
+            .layout-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0 4px;
+                align-items: start;
+            }
+            .layout-grid > .full-span { grid-column: 1 / -1; }
+            .hourly-scroll { padding: 14px 0; }
+        }
 
         /* ---- Live updates (WebSocket) ---- */
         .live-pill {
@@ -365,6 +431,18 @@
     </style>
 </head>
 <body>
+{#- Readable factor names: the panel used to print 4-char slices like "temp humi" -#}
+{% set FACTOR_WORDS = {
+    'temperature': 'temp', 'humidity': 'humidity', 'wind': 'wind',
+    'precipitation': 'rain', 'dewpoint': 'dew point', 'data': 'missing data',
+    'rain_last_24h': 'rain (past)', 'rain_next_24h': 'rain (coming)',
+    'cure_temp': 'overnight temp', 'freeze_risk': 'freeze',
+    'rain_during_cure': 'rain during cure', 'heat_stress': 'heat',
+    'wind_drying': 'wind drying'
+} %}
+{#- date -> "Today"/"Tomorrow"/"Sat", built server-side in _day_label -#}
+{% set DAY_LABELS = {} %}
+{% for d in days %}{% set _ = DAY_LABELS.update({d.date: d.label}) %}{% endfor %}
     <!-- Live WebSocket banner (pushed alerts) + connection indicator -->
     <div class="alert-banner" id="alert-banner"></div>
     <div class="live-pill"><span class="live-dot live-dot-off" id="live-dot"></span><span id="live-label">off</span></div>
@@ -421,8 +499,40 @@
         <span class="vb vb-{{ sealer_score or 'gray' }} vb-clickable" onclick="togglePanel('sealer-panel')">Sealer: {% if sealer_score == 'green' %}Go{% elif sealer_score == 'yellow' %}Caution{% elif sealer_score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
         <span class="vb vb-{{ (today.score or 'gray') if today else 'gray' }} vb-clickable" onclick="togglePanel('pour-panel')">Pour: {% if today and today.score == 'green' %}Go{% elif today and today.score == 'yellow' %}Caution{% elif today and today.score == 'red' %}No{% else %}No Data{% endif %} ▾</span>
         {% if today and today.best_window %}
-        <span class="vb vb-blue">{{ today.best_window }}</span>
+        <span class="vb vb-blue">{{ today.best_window_label }}</span>
         {% endif %}
+    </div>
+
+    <!-- WHY: plain-English reasons behind each verdict -->
+    <div class="verdict-why">
+        <div class="why-block why-{{ (today.score or 'gray') if today else 'gray' }}">
+            <div class="why-head">Pour {{ today.label if today else '' }}</div>
+            {% if today and today.reasons %}
+                {% for r in today.reasons[:3] %}
+                <div class="why-line">{{ r }}</div>
+                {% endfor %}
+                {% if today.best_window %}
+                <div class="why-line" style="color:#0a84ff;">Best window {{ today.best_window_label }}</div>
+                {% endif %}
+            {% elif today and today.score == 'green' %}
+                <div class="why-line why-ok">Clear all working hours — good to pour {{ today.best_window_label }}</div>
+            {% else %}
+                <div class="why-line">No forecast data for working hours — treat as no-go</div>
+            {% endif %}
+        </div>
+
+        <div class="why-block why-{{ sealer_score or 'gray' }}">
+            <div class="why-head">Sealer now</div>
+            {% if sealer_reasons %}
+                {% for r in sealer_reasons[:3] %}
+                <div class="why-line">{{ r }}</div>
+                {% endfor %}
+            {% elif sealer_score == 'green' %}
+                <div class="why-line why-ok">Slab dry, no rain coming, temps hold overnight</div>
+            {% else %}
+                <div class="why-line">Not enough recent-weather data to judge — treat as no-go</div>
+            {% endif %}
+        </div>
     </div>
 
     <!-- SEALER DETAIL PANEL -->
@@ -433,7 +543,7 @@
             <div class="dp-factor">
                 <div>
                     <span class="dp-dot dp-dot-{{ value }}"></span>
-                    <span class="dp-factor-name">{{ factor.replace('_', ' ').title() }}</span>
+                    <span class="dp-factor-name">{{ (FACTOR_WORDS.get(factor, factor.replace('_', ' ')))|title }}</span>
                 </div>
                 <span class="dp-factor-val" style="color:{% if value == 'green' %}#34c759{% elif value == 'yellow' %}#ffcc00{% else %}#ff453a{% endif %}">{{ value|upper }}</span>
             </div>
@@ -469,22 +579,20 @@
         <div class="detail-panel-inner">
             <div class="dp-title">Pour Assessment — Work Hours (7AM–5PM)</div>
             {% for h in forecast_hours %}
-            {% if h.hour >= 7 and h.hour < 17 %}
+            {% if h.hour >= work_start_hour and h.hour < work_end_hour %}
             {% set pp = h.precip_prob_pct or 0 %}
             <div class="dp-factor">
                 <div>
                     <span class="dp-dot dp-dot-{{ h.pour_score or 'gray' }}"></span>
-                    <span class="dp-factor-name">{{ "%02d"|format(h.hour) }}:00</span>
+                    <span class="dp-factor-name">{{ h.hour_label }}</span>
                     <span class="dp-factor-detail" style="margin-left:6px;">
-                        {{ h.temp_f|round(0)|int if h.temp_f else '—' }}° · {{ pp|round(0)|int }}% rain · {{ h.wind_mph|round(0)|int if h.wind_mph else '—' }}mph · {{ h.humidity_pct|round(0)|int if h.humidity_pct else '—' }}% humid
+                        {{ h.temp_f|round(0)|int if h.temp_f is not none else '—' }}° · {{ pp|round(0)|int }}% rain · {{ h.wind_mph|round(0)|int if h.wind_mph is not none else '—' }}mph · {{ h.humidity_pct|round(0)|int if h.humidity_pct is not none else '—' }}% humid
                     </span>
                 </div>
-                <span class="dp-factor-val" style="color:{% if h.pour_score == 'green' %}#34c759{% elif h.pour_score == 'yellow' %}#ffcc00{% else %}#ff453a{% endif %}">
-                    {% if h.pour_factors %}
-                        {% for f, v in h.pour_factors.items() %}{% if v != 'green' %}{{ f[:4] }}{% if not loop.last %} {% endif %}{% endif %}{% endfor %}
-                        {% set bad = h.pour_factors.values()|select('ne', 'green')|list %}
-                        {% if not bad %}OK{% endif %}
-                    {% endif %}
+                <span class="dp-factor-val" style="color:{% if h.pour_score == 'green' %}#34c759{% elif h.pour_score == 'yellow' %}#ffcc00{% elif h.pour_score == 'red' %}#ff453a{% else %}#98989d{% endif %}">
+                    {% set bad = [] %}
+                    {% for f, v in h.pour_factors.items() if v != 'green' %}{% set _ = bad.append(FACTOR_WORDS.get(f, f)) %}{% endfor %}
+                    {% if bad %}{{ bad|join(', ') }}{% elif h.pour_score %}OK{% else %}no data{% endif %}
                 </span>
             </div>
             {% endif %}
@@ -503,8 +611,11 @@
         </div>
     </div>
 
+    <!-- Cards: single column on phones, two columns on a desk/laptop screen -->
+    <div class="layout-grid">
+
     <!-- HOURLY SCROLL (next 24h quick glance) -->
-    <div class="card">
+    <div class="card full-span">
         <div class="card-header">Hourly Forecast</div>
         <div class="hourly-scroll">
             {% set prev_d = namespace(val='') %}
@@ -516,7 +627,7 @@
             {% endif %}
             {% if loop.first %}{% set prev_d.val = ds %}{% endif %}
             <div class="h-col {% if loop.first %}h-now{% endif %}">
-                <div class="h-time">{% if loop.first %}Now{% else %}{{ "%02d"|format(h.hour) }}{% endif %}</div>
+                <div class="h-time">{% if loop.first %}Now{% else %}{{ h.hour_label }}{% endif %}</div>
                 <div class="h-icon">{% set pp = h.precip_prob_pct or 0 %}{% if pp >= 40 %}🌧{% elif pp >= 15 %}🌦{% elif (h.cloud_cover_pct or 0) >= 70 %}☁️{% elif (h.cloud_cover_pct or 0) >= 30 %}⛅{% else %}☀️{% endif %}</div>
                 <div class="h-temp">{{ h.temp_f|round(0)|int if h.temp_f is not none else '—' }}°</div>
                 {% if pp >= 10 %}<div class="h-rain">{{ pp|round(0)|int }}%</div>{% else %}<div class="h-rain"></div>{% endif %}
@@ -548,17 +659,19 @@
 
         {% set prev_d2 = namespace(val='') %}
         {% for h in forecast_hours %}
-        {% if h.hour % 3 == 0 %}
+        {#- Every working hour, plus every 3rd hour overnight: detail where the
+            decision is made, without 48 rows of 3am -#}
+        {% if (h.hour >= work_start_hour and h.hour < work_end_hour) or h.hour % 3 == 0 %}
         {% set ds = h.time[:10] %}
         {% if ds != prev_d2.val %}
             {% set prev_d2.val = ds %}
-            <div class="u-day-label">{{ ds[5:] }}</div>
+            <div class="u-day-label">{{ DAY_LABELS.get(ds, ds[5:]) }}</div>
         {% endif %}
-        {% set t = h.temp_f or t_min %}
+        {% set t = h.temp_f if h.temp_f is not none else t_min %}
         {% set pct = ((t - t_min) / t_range * 70 + 15) %}
         {% set pp = h.precip_prob_pct or 0 %}
-        <div class="u-row" {% if h.hour < 7 or h.hour >= 17 %}style="opacity:0.3"{% endif %}>
-            <div class="u-time">{{ "%02d"|format(h.hour) }}</div>
+        <div class="u-row" {% if h.hour < work_start_hour or h.hour >= work_end_hour %}style="opacity:0.35"{% endif %}>
+            <div class="u-time">{{ h.hour_label }}</div>
             <div class="u-temp-col" style="{% if t < 40 %}color:#64b5f6{% elif t < 50 %}color:#4dd0e1{% elif t <= 90 %}color:#fff{% elif t <= 95 %}color:#ffb74d{% else %}color:#ef5350{% endif %}">{{ t|round(0)|int }}°</div>
             <div class="u-bar-col">
                 <div class="u-bar">
@@ -575,22 +688,34 @@
         {% endfor %}
     </div>
 
-    <!-- DAY SUMMARIES -->
-    <div class="card">
-        <div class="card-header">Daily Overview</div>
+    <!-- 7-DAY OUTLOOK -->
+    <div class="card full-span">
+        <div class="card-header">7-Day Pour Outlook</div>
         {% for day in days %}
-        <div style="display:flex; align-items:center; padding:10px 16px; {% if not loop.last %}border-bottom:1px solid rgba(255,255,255,0.04);{% endif %}">
-            <div style="flex:1;">
-                <span style="font-weight:600; font-size:0.85rem;">{{ day.date[5:] }}</span>
-                <span style="color:rgba(255,255,255,0.4); font-size:0.8rem; margin-left:8px;">{{ day.temp_low|round(0)|int if day.temp_low is not none else '—' }}°–{{ day.temp_high|round(0)|int if day.temp_high is not none else '—' }}°</span>
+        <div class="ol-row">
+            <div class="ol-day">{{ day.label }}</div>
+            <div class="ol-temps">{{ day.temp_low|round(0)|int if day.temp_low is not none else '—' }}°–{{ day.temp_high|round(0)|int if day.temp_high is not none else '—' }}°</div>
+            <div class="ol-why">
+                {% if day.reasons %}{{ day.reasons[0] }}
+                {% elif day.score == 'green' %}Clear all working hours
+                {% else %}No working-hour data{% endif %}
             </div>
             {% if day.best_window %}
-            <span style="font-size:0.65rem; color:#0a84ff; margin-right:10px;">{{ day.best_window }}</span>
+            <span style="font-size:0.62rem; color:#0a84ff; margin-right:8px; flex-shrink:0;">{{ day.best_window_label }}</span>
             {% endif %}
-            <span class="vb vb-{{ day.score or 'gray' }}" style="padding:3px 10px; font-size:0.6rem;">{{ day.score|upper if day.score else 'NO DATA' }}</span>
+            <span class="vb vb-{{ day.score or 'gray' }} ol-badge" style="padding:3px 9px; font-size:0.58rem;">{{ day.score|upper if day.score else 'NO DATA' }}</span>
         </div>
         {% endfor %}
+        {% if outlook_days %}
+        <div class="outlook-note">
+            Beyond 48 hours ({{ outlook_days|map(attribute='label')|join(', ') }}) these are day-level
+            outlooks for scheduling — hour-by-hour rain timing that far out isn't reliable enough to
+            commit a pour to. Re-check the morning of.
+        </div>
+        {% endif %}
     </div>
+
+    </div><!-- /layout-grid -->
 
     {% else %}
     <div style="text-align:center; padding:60px 20px; color:rgba(255,255,255,0.3);">

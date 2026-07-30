@@ -47,8 +47,33 @@ HOURLY_PARAMS = [
 ]
 
 
+async def fetch_forecast(lat: float, lon: float, days: int = 7) -> dict:
+    """Fetch hourly forecast covering `days` calendar days from Open-Meteo.
+
+    NOTE: `forecast_days` returns WHOLE calendar days starting at today
+    00:00 local, so the response includes hours that have already passed.
+    Callers must filter to upcoming hours (see main._upcoming_hours) — the
+    first row is midnight, not "now".
+    """
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ",".join(HOURLY_PARAMS),
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "timezone": "America/New_York",
+        "forecast_days": days,
+    }
+
+    return await _get_json(OPEN_METEO_FORECAST_URL, params)
+
+
 async def fetch_forecast_48h(lat: float, lon: float) -> dict:
-    """Fetch 48-hour hourly forecast from Open-Meteo."""
+    """Rolling 48-hour hourly forecast starting at the current hour.
+
+    Used by the hourly snapshot job, which wants exactly 48h from now.
+    """
     params = {
         "latitude": lat,
         "longitude": lon,
