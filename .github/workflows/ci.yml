@@ -93,7 +93,14 @@ jobs:
           python-version: "3.12"
 
       - name: Install dbt
-        run: pip install 'dbt-postgres>=1.8,<1.10'
+        # dbt-postgres 1.9 declares `dbt-core>=1.8.0` with no upper bound, so
+        # pip is free to pull a dbt-core 2.x. That path builds
+        # dbt-core-experimental-parser, whose build backend downloads a wheel
+        # from GitHub releases at install time — a network fetch that has
+        # already failed a build here with HTTP 503. Bound dbt-core to the same
+        # 1.9 line as the adapter so a deploy can't be blocked by an unrelated
+        # upstream release.
+        run: pip install 'dbt-postgres>=1.8,<1.10' 'dbt-core>=1.9,<1.10'
 
       - name: Create schema and seed data
         env:
