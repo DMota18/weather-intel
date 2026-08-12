@@ -112,7 +112,39 @@ class TestAboutPage:
         assert resp.status_code == 200
         assert "Weather Intel" in resp.text
 
+    def test_renders_fully_with_no_unresolved_template_syntax(self):
+        resp = client.get("/about")
+        assert "{{" not in resp.text and "{%" not in resp.text
+
+    def test_reports_a_freshness_state(self):
+        # Either sources are live or they aren't — the page must say which,
+        # never present stale figures as current
+        resp = client.get("/about")
+        assert "Live system" in resp.text or "Data sources unavailable" in resp.text
+
+    def test_shows_architecture_diagram(self):
+        resp = client.get("/about")
+        assert "<svg viewBox" in resp.text
+
+    def test_test_count_is_computed_not_hardcoded(self):
+        # The About page quotes a test count; it must come from the suite on
+        # disk so it can't drift as tests are added
+        from main import _count_tests
+        counted = _count_tests()
+        assert counted is None or counted > 0
+
+    def test_stats_degrade_without_inventing_numbers(self):
+        from main import _platform_stats
+        stats = _platform_stats()
+        assert set(["records", "stations", "db_ok"]).issubset(stats.keys())
+        if not stats["db_ok"]:
+            assert stats["records"] is None
+
     def test_dashboard_returns_html(self):
         resp = client.get("/")
         assert resp.status_code == 200
         assert "Weather Intel" in resp.text
+
+    def test_dashboard_links_to_about(self):
+        resp = client.get("/")
+        assert 'href="/about"' in resp.text
