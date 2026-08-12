@@ -4,131 +4,347 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>About — Weather Intel</title>
+    <meta name="description" content="Weather intelligence platform for stamped concrete work in Massachusetts — NOAA ETL, dbt, Airflow, FastAPI.">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
             background: #000000;
             color: #e2e8f0;
-            max-width: 600px;
+            max-width: 760px;
             margin: 0 auto;
-            padding: 20px;
-            line-height: 1.7;
+            padding: 20px 20px 0;
+            line-height: 1.65;
             -webkit-font-smoothing: antialiased;
         }
-        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px; }
-        h2 { font-size: 1rem; font-weight: 600; margin: 28px 0 10px; color: #ffffff; }
-        p { color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-bottom: 14px; }
+        h1 { font-size: 1.7rem; font-weight: 600; letter-spacing: -0.5px; }
+        h2 {
+            font-size: 0.72rem; font-weight: 700; margin: 34px 0 12px;
+            color: rgba(255,255,255,0.45);
+            text-transform: uppercase; letter-spacing: 1.4px;
+        }
+        h3 { font-size: 0.95rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+        p { color: rgba(255,255,255,0.72); font-size: 0.92rem; margin-bottom: 14px; }
+        strong { color: #fff; font-weight: 600; }
         a { color: #0a84ff; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .back { display: inline-block; margin-bottom: 20px; font-size: 0.85rem; color: #0a84ff; }
-        .tag {
-            display: inline-block;
-            background: rgba(255,255,255,0.08);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 6px;
-            padding: 3px 10px;
-            font-size: 0.7rem;
-            color: rgba(255,255,255,0.5);
-            margin: 2px 2px;
+        .back { display: inline-block; margin-bottom: 22px; font-size: 0.85rem; }
+        .lede { font-size: 1.02rem; color: rgba(255,255,255,0.8); margin: 8px 0 4px; }
+
+        /* ---- Live freshness strip ---- */
+        .freshness {
+            background: rgba(52,199,89,0.07);
+            border: 1px solid rgba(52,199,89,0.25);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 20px 0 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 22px;
+            align-items: baseline;
         }
+        .freshness.stale { background: rgba(255,159,10,0.07); border-color: rgba(255,159,10,0.3); }
+        .freshness.down { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); }
+        .fresh-dot {
+            width: 7px; height: 7px; border-radius: 50%; background: #34c759;
+            display: inline-block; margin-right: 7px;
+            box-shadow: 0 0 7px #34c759;
+        }
+        .freshness.stale .fresh-dot { background: #ff9f0a; box-shadow: 0 0 7px #ff9f0a; }
+        .freshness.down .fresh-dot { background: #98989d; box-shadow: none; }
+        .fresh-item { font-size: 0.74rem; color: rgba(255,255,255,0.55); }
+        .fresh-item b { color: #fff; font-weight: 600; }
+        .fresh-lead { font-size: 0.74rem; font-weight: 700; color: #34c759; text-transform: uppercase; letter-spacing: 0.8px; }
+        .freshness.stale .fresh-lead { color: #ff9f0a; }
+        .freshness.down .fresh-lead { color: #98989d; }
+
+        /* ---- Stats ---- */
         .stat-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 10px;
             margin: 16px 0;
         }
         .stat {
             background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.07);
             border-radius: 12px;
             padding: 14px;
             text-align: center;
         }
-        .stat-num { font-size: 1.5rem; font-weight: 700; color: #ffffff; }
-        .stat-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
-        .arch {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 16px;
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 0.7rem;
-            color: rgba(255,255,255,0.6);
-            line-height: 1.8;
-            overflow-x: auto;
+        .stat-num { font-size: 1.45rem; font-weight: 700; color: #ffffff; letter-spacing: -0.5px; }
+        .stat-label { font-size: 0.6rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+
+        /* ---- Callout: the interesting engineering ---- */
+        .callout {
+            background: rgba(255,255,255,0.04);
+            border-left: 2px solid #ff453a;
+            border-radius: 0 10px 10px 0;
+            padding: 14px 16px;
             margin: 16px 0;
         }
-        .footer { text-align: center; color: rgba(255,255,255,0.15); font-size: 0.55rem; padding: 30px 0; }
+        .callout.good { border-left-color: #34c759; }
+        .callout p:last-child { margin-bottom: 0; }
+        .callout code, .inline-code {
+            font-family: 'SF Mono', ui-monospace, 'Fira Code', monospace;
+            font-size: 0.82em;
+            background: rgba(255,255,255,0.08);
+            padding: 1px 5px;
+            border-radius: 4px;
+            color: #e2e8f0;
+        }
+
+        /* ---- Architecture diagram ---- */
+        .diagram {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 14px;
+            padding: 16px 12px;
+            margin: 16px 0;
+            overflow-x: auto;
+        }
+        .diagram svg { width: 100%; min-width: 500px; height: auto; display: block; }
+
+        /* ---- Decision list ---- */
+        .decisions { list-style: none; margin: 8px 0 16px; }
+        .decisions li {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .decisions li:last-child { border-bottom: none; }
+        .decisions p { margin: 4px 0 0; font-size: 0.87rem; }
+
+        .tag {
+            display: inline-block;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.6);
+            margin: 3px 2px;
+        }
+        .footer {
+            text-align: center; color: rgba(255,255,255,0.2);
+            font-size: 0.62rem; padding: 34px 0 40px;
+            border-top: 1px solid rgba(255,255,255,0.06); margin-top: 34px;
+        }
+        .muted { color: rgba(255,255,255,0.35); font-size: 0.75rem; }
     </style>
 </head>
 <body>
     <a href="/" class="back">&larr; Back to Dashboard</a>
 
     <h1>Weather Intel</h1>
-    <p>A weather intelligence platform built for a stamped concrete business in Massachusetts.</p>
+    <p class="lede">A decision tool for a stamped-concrete business in Massachusetts: it answers one question — <strong>can we pour, seal, or cure today?</strong> — across 10 towns, and it runs the business.</p>
 
-    <h2>The Problem</h2>
-    <p>Concrete work depends on weather. Too cold and it won't cure. Too hot and it cracks. Rain ruins a fresh pour. Wind dries the surface wrong. Sealer needs a full day of dry conditions before and after application.</p>
-    <p>Standard weather apps say "72°F, partly cloudy." That doesn't answer the question a concrete crew needs answered at 6AM: <strong>can we work today?</strong></p>
+    <!-- LIVE DATA FRESHNESS -->
+    {% if forecast_fetched_at or stats.db_ok %}
+    <div class="freshness {% if forecast_age_min is not none and forecast_age_min > 90 %}stale{% endif %}">
+        <span class="fresh-lead"><span class="fresh-dot"></span>Live system</span>
+        {% if forecast_fetched_at %}
+        <span class="fresh-item">Forecast data as of <b>{{ forecast_fetched_at }}</b>{% if forecast_age_min is not none %} ({{ forecast_age_min }} min ago){% endif %}</span>
+        {% endif %}
+        {% if stats.latest_observation %}
+        <span class="fresh-item">NOAA history through <b>{{ stats.latest_observation }}</b></span>
+        {% endif %}
+        <span class="fresh-item">Page generated <b>{{ generated_at }}</b> ET</span>
+    </div>
+    {% else %}
+    <div class="freshness down">
+        <span class="fresh-lead"><span class="fresh-dot"></span>Data sources unavailable</span>
+        <span class="fresh-item">The dashboard reports this honestly rather than showing stale numbers as current. Page generated <b>{{ generated_at }}</b> ET.</span>
+    </div>
+    {% endif %}
+    <p class="muted">Every figure on this page is read from the running system at page load — nothing here is hard-coded.</p>
 
-    <h2>The Solution</h2>
-    <p>This platform scores weather conditions specifically for concrete work — green, yellow, or red — for pouring, sealer application, and post-pour curing. It checks temperature, humidity, wind, precipitation, and dew point against industry thresholds and gives a go/no-go verdict with a recommended work window.</p>
-    <p>The 48-hour forecast shows exactly which hours are safe. The sealer check looks backward (did it rain in the last 24 hours?) and forward (will it rain in the next 24?). The cure check evaluates whether the next 48 hours are safe for fresh concrete to harden.</p>
+    <h2>The problem</h2>
+    <p>Concrete is unforgiving. Below 40&deg;F the hydration reaction stalls and it never reaches strength. Above 95&deg;F it flash-sets and cracks. Rain on a fresh pour washes out the surface. Wind dries the top faster than the bottom and it curls. Sealer needs a dry slab for 24 hours <em>before</em> and 24 hours <em>after</em> — and it cures overnight, so a warm afternoon means nothing if it drops to 35&deg;F at 2am.</p>
+    <p>A normal weather app says "72&deg;F, partly cloudy." That doesn't answer the question a crew needs answered at 6am. Getting it wrong costs thousands of dollars — a ruined pour means a tear-out and a redo.</p>
 
-    <h2>The Data</h2>
-    <p>Historical weather data comes from NOAA — the same government agency that runs the National Weather Service. Their raw files are notoriously messy: fixed-width text formats, missing values coded as -9999, temperatures stored in tenths of degrees Celsius. This platform cleans, converts, and validates that data automatically.</p>
-    <p>Live forecasts come from Open-Meteo, updated every 15 minutes via a real-time streaming pipeline. Severe weather alerts from the National Weather Service are monitored and pushed to the dashboard.</p>
+    <h2>What it does</h2>
+    <p>It scores every hour of a {{ forecast_days }}-day forecast against concrete-specific thresholds — temperature, humidity, wind, precipitation probability, and dew point spread — and rolls those hours into a green / yellow / red verdict for the 7am&ndash;5pm working day, with the best usable window and a plain-English reason.</p>
+    <p>Three separate decisions, because they have different physics: <strong>pour</strong> (hour-by-hour conditions), <strong>seal</strong> (dry 24h behind and ahead, plus the overnight low), and <strong>cure</strong> (freeze, rain, heat, and wind across the 48 hours after a pour). National Weather Service severe-weather alerts surface on the dashboard.</p>
 
+    <h2>The engineering decision that matters most</h2>
+    <p>Real money rides on a green verdict, which makes this a system where <strong>the failure modes are asymmetric</strong>: a wrong "red" costs a day of scheduling, a wrong "green" costs a tear-out. So the whole scoring engine is built on one rule — <em>missing data must never improve a verdict.</em></p>
+
+    <div class="callout">
+        <h3>A bug this rule was written to kill</h3>
+        <p>The day verdict was built as "collect the scored working hours, then call it green unless something is red or yellow." When that list came back <em>empty</em> — no data, or a forecast fetched in the evening after the working day had passed — the day was labeled <strong>green</strong>. Every evening, "today" showed GO regardless of actual conditions.</p>
+    </div>
+
+    <div class="callout good">
+        <h3>How it works now</h3>
+        <p>An hour with any missing input carries a <span class="inline-code">data</span> factor that caps it at yellow, so partial data can never reach green. A day with no scorable working hours returns <em>no data</em> and renders as a gray NO&nbsp;DATA chip. When a source is unreachable, the API serves the last known good reading explicitly flagged <span class="inline-code">stale</span>, and returns a 503 that says <em>treat as no-go</em> rather than guessing. Unknown is never safe.</p>
+    </div>
+
+    <h2>Architecture</h2>
+    <div class="diagram">
+        <svg viewBox="0 0 700 260" role="img" aria-label="Architecture: three data sources feed a Python ETL and API layer backed by PostgreSQL, dbt and BigQuery, served through FastAPI, orchestrated by Airflow and deployed by GitHub Actions.">
+            <defs>
+                <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="2.5" orient="auto">
+                    <path d="M0,0 L6,2.5 L0,5 z" fill="rgba(255,255,255,0.35)"/>
+                </marker>
+                <style>
+                    .bx { fill: rgba(255,255,255,0.06); stroke: rgba(255,255,255,0.16); rx: 7; }
+                    .bx-src { fill: rgba(10,132,255,0.13); stroke: rgba(10,132,255,0.45); }
+                    .bx-core { fill: rgba(52,199,89,0.12); stroke: rgba(52,199,89,0.45); }
+                    .bx-ops { fill: rgba(255,159,10,0.10); stroke: rgba(255,159,10,0.35); }
+                    .t { fill: #e8ecf1; font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 600; }
+                    .ts { fill: rgba(255,255,255,0.5); font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 8.5px; }
+                    .lbl { fill: rgba(255,255,255,0.32); font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 8px; letter-spacing: 1px; }
+                    .ln { stroke: rgba(255,255,255,0.28); stroke-width: 1.2; fill: none; }
+                </style>
+            </defs>
+
+            <text class="lbl" x="10" y="16">SOURCES</text>
+            <text class="lbl" x="250" y="16">PIPELINE</text>
+            <text class="lbl" x="560" y="16">SERVING</text>
+
+            <!-- Sources -->
+            <rect class="bx bx-src" x="10" y="30" width="150" height="42"/>
+            <text class="t" x="22" y="49">NOAA GHCN-Daily</text>
+            <text class="ts" x="22" y="63">fixed-width .dly history</text>
+
+            <rect class="bx bx-src" x="10" y="86" width="150" height="42"/>
+            <text class="t" x="22" y="105">Open-Meteo</text>
+            <text class="ts" x="22" y="119">hourly forecast + recent</text>
+
+            <rect class="bx bx-src" x="10" y="142" width="150" height="42"/>
+            <text class="t" x="22" y="161">NWS Alerts API</text>
+            <text class="ts" x="22" y="175">severe weather</text>
+
+            <!-- Pipeline -->
+            <rect class="bx" x="215" y="30" width="140" height="42"/>
+            <text class="t" x="227" y="49">Python ETL</text>
+            <text class="ts" x="227" y="63">parse, QC, unit convert</text>
+
+            <rect class="bx bx-core" x="215" y="86" width="140" height="42"/>
+            <text class="t" x="227" y="105">PostgreSQL</text>
+            <text class="ts" x="227" y="119">daily_weather, jobs</text>
+
+            <rect class="bx" x="215" y="142" width="140" height="42"/>
+            <text class="t" x="227" y="161">Redis Streams</text>
+            <text class="ts" x="227" y="175">live updates + alerts</text>
+
+            <rect class="bx" x="385" y="30" width="130" height="42"/>
+            <text class="t" x="397" y="49">dbt</text>
+            <text class="ts" x="397" y="63">models + data tests</text>
+
+            <rect class="bx" x="385" y="86" width="130" height="42"/>
+            <text class="t" x="397" y="105">BigQuery</text>
+            <text class="ts" x="397" y="119">analytics warehouse</text>
+
+            <rect class="bx bx-core" x="385" y="142" width="130" height="42"/>
+            <text class="t" x="397" y="161">Scoring engine</text>
+            <text class="ts" x="397" y="175">fail-safe verdicts</text>
+
+            <!-- Serving -->
+            <rect class="bx bx-core" x="545" y="86" width="145" height="52"/>
+            <text class="t" x="557" y="108">FastAPI</text>
+            <text class="ts" x="557" y="122">REST + WebSocket</text>
+
+            <rect class="bx" x="545" y="152" width="145" height="42"/>
+            <text class="t" x="557" y="171">Dashboard</text>
+            <text class="ts" x="557" y="185">mobile-first, no JS deps</text>
+
+            <!-- Flows -->
+            <path class="ln" d="M160,51 L210,51" marker-end="url(#ar)"/>
+            <path class="ln" d="M160,107 L210,107" marker-end="url(#ar)"/>
+            <path class="ln" d="M160,163 L210,163" marker-end="url(#ar)"/>
+            <path class="ln" d="M285,72 L285,84" marker-end="url(#ar)"/>
+            <path class="ln" d="M355,51 L380,51" marker-end="url(#ar)"/>
+            <path class="ln" d="M355,107 L380,107" marker-end="url(#ar)"/>
+            <path class="ln" d="M355,163 L380,163" marker-end="url(#ar)"/>
+            <path class="ln" d="M450,128 L450,140" marker-end="url(#ar)"/>
+            <path class="ln" d="M515,163 L530,163 L530,115 L540,115" marker-end="url(#ar)"/>
+            <path class="ln" d="M617,138 L617,150" marker-end="url(#ar)"/>
+
+            <!-- Ops bar -->
+            <rect class="bx bx-ops" x="10" y="208" width="330" height="38"/>
+            <text class="t" x="22" y="226">Apache Airflow</text>
+            <text class="ts" x="22" y="239">daily ETL &middot; hourly forecast snapshot &middot; weekly backfill</text>
+
+            <rect class="bx bx-ops" x="360" y="208" width="330" height="38"/>
+            <text class="t" x="372" y="226">GitHub Actions &rarr; AWS EC2</text>
+            <text class="ts" x="372" y="239">tests + lint + dbt, then deploy with health check &amp; rollback</text>
+        </svg>
+    </div>
+
+    <h2>By the numbers</h2>
     <div class="stat-grid">
         <div class="stat">
-            <div class="stat-num">18,000+</div>
-            <div class="stat-label">Daily Weather Records</div>
+            <div class="stat-num">{% if stats.records %}{{ "{:,}".format(stats.records) }}{% else %}&mdash;{% endif %}</div>
+            <div class="stat-label">Weather records</div>
         </div>
         <div class="stat">
-            <div class="stat-num">10</div>
-            <div class="stat-label">MA Weather Stations</div>
+            <div class="stat-num">{{ stats.stations or station_count }}</div>
+            <div class="stat-label">MA stations</div>
         </div>
         <div class="stat">
-            <div class="stat-num">45</div>
-            <div class="stat-label">Jobs Tracked</div>
+            <div class="stat-num">{% if stats.first_year and stats.last_year %}{{ stats.last_year - stats.first_year }}{% else %}&mdash;{% endif %}</div>
+            <div class="stat-label">Years of history</div>
         </div>
         <div class="stat">
-            <div class="stat-num">60</div>
-            <div class="stat-label">Automated Tests</div>
+            <div class="stat-num">{% if stats.jobs %}{{ stats.jobs }}{% else %}&mdash;{% endif %}</div>
+            <div class="stat-label">Jobs correlated</div>
+        </div>
+        <div class="stat">
+            <div class="stat-num">{{ test_count or "&mdash;"|safe }}</div>
+            <div class="stat-label">Automated tests</div>
         </div>
     </div>
+    <p class="muted">Jobs are joined to the weather on the days they ran, so the archive can answer "what did we actually work through?" rather than only "what's the forecast?"</p>
+    {% if not stats.db_ok %}
+    <p class="muted">Database counts are unavailable right now — the page shows what it can rather than inventing figures. The forecast and scoring paths don't depend on the database, so the dashboard keeps working.</p>
+    {% endif %}
 
-    <h2>How It's Built</h2>
-    <div class="arch">
-        NOAA Raw Data &rarr; Python ETL &rarr; PostgreSQL<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;dbt (transform + test)<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
-        Airflow (orchestrate) &rarr; BigQuery (warehouse)<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
-        Redis Streams &rarr; FastAPI + WebSocket &rarr; Dashboard<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&darr;<br>
-        GitHub Actions CI/CD &rarr; Auto-deploy to EC2
-    </div>
+    <h2>Engineering notes</h2>
+    <ul class="decisions">
+        <li>
+            <h3>Parsing NOAA GHCN-Daily</h3>
+            <p>Fixed-width records, one line per station-month-element, 31 day slots each with value + 3 flags. Missing is <span class="inline-code">-9999</span>, temperatures are in tenths of &deg;C, precipitation in tenths of mm. Values failing NOAA's quality flags are dropped rather than trusted, and short months are handled by calendar rather than by guessing.</p>
+        </li>
+        <li>
+            <h3>Time is local, always</h3>
+            <p>The 7am&ndash;5pm working window is meaningless in UTC. Forecasts are requested in <span class="inline-code">America/New_York</span> and every window — last 24h, next 24h, the working day — is sliced by real timestamps rather than list position, which is what a naive slice gets wrong when a response starts at midnight instead of "now."</p>
+        </li>
+        <li>
+            <h3>Degradation is a feature</h3>
+            <p>Upstream calls retry with backoff, then fall back to last-known-good data marked <span class="inline-code">stale</span>, then fail loudly. The app boots and serves verdicts with PostgreSQL and Redis both down, because the pour decision doesn't need either.</p>
+        </li>
+        <li>
+            <h3>Tested where it counts</h3>
+            <p>{% if test_count %}{{ test_count }} tests{% else %}The test suite{% endif %} concentrate on the scoring engine and its edge cases — threshold boundaries, zero-degree readings that must not read as "missing," missing-data caps, and the working-window boundary. CI runs tests, Ruff, and SQLFluff against a live PostgreSQL on every push, then deploys with a health check and automatic rollback.</p>
+        </li>
+    </ul>
 
-    <div style="margin: 16px 0;">
+    <h2>Stack</h2>
+    <div style="margin: 10px 0 4px;">
         <span class="tag">Python</span>
+        <span class="tag">FastAPI</span>
         <span class="tag">PostgreSQL</span>
         <span class="tag">dbt</span>
         <span class="tag">Apache Airflow</span>
         <span class="tag">Redis Streams</span>
-        <span class="tag">Google BigQuery</span>
-        <span class="tag">FastAPI</span>
         <span class="tag">WebSocket</span>
+        <span class="tag">BigQuery</span>
         <span class="tag">GitHub Actions</span>
         <span class="tag">AWS EC2</span>
+        <span class="tag">Terraform</span>
         <span class="tag">nginx</span>
-        <span class="tag">Let's Encrypt</span>
+        <span class="tag">pytest</span>
+        <span class="tag">Ruff</span>
     </div>
 
-    <h2>Built By</h2>
-    <p>Dylan Mota — concrete contractor and data engineer based in Massachusetts. This platform is a working business tool and a portfolio project demonstrating end-to-end data engineering.</p>
-    <p><a href="https://github.com/DMota18/weather-intel">View the code on GitHub &rarr;</a></p>
+    <h2>Built by</h2>
+    <p>Dylan Mota — concrete contractor and data engineer in Massachusetts. This is a working business tool first and a portfolio project second, which is why it's built to fail safe rather than to demo well.</p>
+    <p><a href="https://github.com/DMota18/weather-intel">Read the code on GitHub &rarr;</a></p>
 
-    <div class="footer">Weather Intel &middot; Built with real data for a real business</div>
+    <div class="footer">
+        Weather Intel &middot; Data from NOAA GHCN-Daily, Open-Meteo, and the National Weather Service<br>
+        Scoring thresholds follow ACI 305/306-style field guidance. Always verify conditions on site.
+    </div>
 </body>
 </html>

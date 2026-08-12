@@ -767,10 +767,83 @@ async def get_job_weather(job_id: int):
 # DASHBOARD
 # ============================================================
 
+def _count_tests():
+    """Count test functions in tests/ so the About page can't quote a stale
+    number. Returns None if the tests aren't on disk (e.g. slim deploy)."""
+    tests_dir = os.path.join(os.path.dirname(__file__), "..", "tests")
+    if not os.path.isdir(tests_dir):
+        return None
+    total = 0
+    try:
+        for name in os.listdir(tests_dir):
+            if name.startswith("test_") and name.endswith(".py"):
+                with open(os.path.join(tests_dir, name)) as f:
+                    total += sum(1 for line in f if line.lstrip().startswith("def test_"))
+    except OSError:
+        return None
+    return total or None
+
+
+def _platform_stats():
+    """Live numbers for the About page. Every field is independently optional —
+    a down database degrades the page to "unavailable" rather than breaking it,
+    and no figure is ever hard-coded (a stale stat in front of a reader is
+    worse than no stat)."""
+    stats = {
+        "records": None, "stations": None, "jobs": None,
+        "first_year": None, "last_year": None,
+        "latest_observation": None, "db_ok": False,
+    }
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT count(*), count(DISTINCT station_id),
+                              min(observation_date), max(observation_date)
+                       FROM daily_weather"""
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    stats["records"] = row[0]
+                    stats["stations"] = row[1]
+                    if row[2] and row[3]:
+                        stats["first_year"] = row[2].year
+                        stats["last_year"] = row[3].year
+                        stats["latest_observation"] = row[3].strftime("%b %-d, %Y")
+                try:
+                    cur.execute("SELECT count(*) FROM jobs")
+                    stats["jobs"] = cur.fetchone()[0] or None
+                except psycopg2.Error:
+                    conn.rollback()  # jobs table optional; keep the rest usable
+                stats["db_ok"] = True
+    except (HTTPException, psycopg2.Error) as e:
+        logger.warning("About page stats unavailable: %s", e)
+    return stats
+
+
+def _forecast_freshness():
+    """When live forecast data was last pulled, across all cached stations."""
+    times = [fetched_at for (_, fetched_at) in _forecast_cache.values()]
+    return max(times) if times else None
+
+
 @app.get("/about", response_class=HTMLResponse)
 async def about_page(request: Request):
-    """About page — explains the project for non-technical visitors."""
-    return templates.TemplateResponse(request, "about.html", {"request": request})
+    """About page — explains the project for non-technical visitors and,
+    for a technical reader, shows the system is live rather than a snapshot."""
+    now = datetime.now(ET)
+    forecast_at = _forecast_freshness()
+
+    return templates.TemplateResponse(request, "about.html", {
+        "request": request,
+        "stats": _platform_stats(),
+        "test_count": _count_tests(),
+        "station_count": len(STATIONS),
+        "forecast_fetched_at": forecast_at.strftime("%-I:%M %p") if forecast_at else None,
+        "forecast_age_min": int((now - forecast_at).total_seconds() // 60) if forecast_at else None,
+        "generated_at": now.strftime("%b %-d, %Y at %-I:%M %p"),
+        "forecast_days": FORECAST_DAYS,
+    })
 
 
 dbt_docs_path = os.path.join(os.path.dirname(__file__), "..", "dbt_project", "target")
